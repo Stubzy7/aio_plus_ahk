@@ -4,23 +4,39 @@ PORT items from the Python version applied to `AIO_+.ahk`.
 
 ---
 
-## Applied (2026-03-17)
+## 2026-03-18
 
-### Detect key: mouse button capture
-- **Status**: Already implemented — `MacroDetectRepeatKey()` already has RButton/LButton/MButton support
+### Upload char: Items Not Allowed detection fix
+- OCR now checks for "Items Not Allowed" **before** "Joining" — prevents false join confirmation when both texts appear in same scan.
+- Tooltip hidden before OCR scan to avoid own tooltip text polluting results.
+
+### Upload char: failed join no longer marks server
+- If join isn't confirmed after 30 attempts, re-arms instead of proceeding. Server stays available in cycle.
+
+### Upload char: removed server gating (`obCharLastDest`)
+- No server is blocked from the F6 cycle. User always has full control over destination.
+
+### Upload char: timer tooltip positioning
+- Timer tooltip (ID 2) moved to y=40 to avoid overlap with status tooltip.
+
+### Upload char: OCR scan area defaults
+- Updated default timer OCR region (index 5) to cover full player inventory area.
+
+### BG Mammoth Drums label
+- GUI label and tooltip updated to "BG Mammoth Drums" to match Python version.
+
+---
+
+## 2026-03-17
 
 ### Auto Imprint: `[E] Feed` fuzzy bracket matching
-- **Problem**: Strict `InStr(ocrText, "[E]")` never matched because OCR misreads brackets as `(E)`, `IE]`, `[E`, etc.
-- **Fix**: Added `ImHasFeedPrompt()` helper with fuzzy matching. Replaced strict checks at both detection points.
+- Added `ImHasFeedPrompt()` helper with fuzzy matching. Replaced strict checks at both detection points.
 
-### "Items Not Allowed" popup detection in upload char join loop
-- **Problem**: Join loop had no OCR check for popup text. Looped 30 times, then set `obCharLastDest` before join was confirmed — corrupting server cycle.
-- **Fix**: Added OCR check for "Items Not Allowed" / "not ready for upload" / "can not be transferred". On detection: Esc x2 to exit, re-arm at stage 1 (inv management). Moved `obCharLastDest` to after join confirmed.
+### Upload char: Items Not Allowed popup detection
+- Added OCR check in join loop for "Items Not Allowed" / "not ready for upload" / "can not be transferred". On detection: Esc x2, re-arm at stage 1.
 
 ### Upload char: 3-stage timer + inv management flow
-- **Problem**: `OBCheckUploadTimer()` blocked with a countdown loop. No way to manage items. Pressing F after timer just re-detected the same timer.
-- **Fix**: 3-stage flow using `obCharTimerStage`:
-  - Stage 0 (first F): OCR checks for timer. If found → close transmitter, show timer, re-arm.
-  - Stage 1 (second F): Inv management — `OBWaitInvClose()` polls for inv close. User manages items, closes inv. Then "Press F at transmitter".
-  - Stage 2 (third F): Re-checks timer. If still active → back to stage 1. If clear → proceeds to Travel.
-  - Items Not Allowed popup → set stage to 1. F1 → full clear, reset stage to 0.
+- 3-stage flow using `obCharTimerStage` replacing blocking `OBCheckUploadTimer()`.
+
+### Upload char: persistent timer tooltip + F1 full clear
+- Timer shown as persistent ToolTip ID 2. F1 calls `OBStopAll()` for full clear.

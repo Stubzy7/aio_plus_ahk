@@ -271,7 +271,6 @@ global obInvTimeout       := 250
 global obCharTravelX      := 0
 global obCharTravelY      := 0
 global obCharCustomServer := ""
-global obCharLastDest     := ""
 global obCharSvrIdx       := 0
 global obCharTimerStage   := 0
 
@@ -298,10 +297,10 @@ global obDownBarSettleMs   := 12000
 global obOcrResizing   := false
 global obOcrTarget     := 0
 global obOcrOverlays   := ""
-global obOcrX          := [Round(270 * widthmultiplier), Round(640 * widthmultiplier), Round(1630 * widthmultiplier), Round(640 * widthmultiplier), Round(359 * widthmultiplier)]
+global obOcrX          := [Round(270 * widthmultiplier), Round(640 * widthmultiplier), Round(1630 * widthmultiplier), Round(640 * widthmultiplier), Round(239 * widthmultiplier)]
 global obOcrY          := [Round(365 * heightmultiplier), Round(440 * heightmultiplier), Round(325 * heightmultiplier), Round(440 * heightmultiplier), Round(301 * heightmultiplier)]
-global obOcrW          := [Round(80  * widthmultiplier), Round(640 * widthmultiplier), Round(150 * widthmultiplier), Round(640 * widthmultiplier), Round(624 * widthmultiplier)]
-global obOcrH          := [Round(40  * heightmultiplier), Round(60 * heightmultiplier), Round(40 * heightmultiplier), Round(60 * heightmultiplier), Round(803 * heightmultiplier)]
+global obOcrW          := [Round(80  * widthmultiplier), Round(640 * widthmultiplier), Round(150 * widthmultiplier), Round(640 * widthmultiplier), Round(757 * widthmultiplier)]
+global obOcrH          := [Round(40  * heightmultiplier), Round(60 * heightmultiplier), Round(40 * heightmultiplier), Round(60 * heightmultiplier), Round(816 * heightmultiplier)]
 
 ; --- NVIDIA Filter---
 global nfEnabled := false
@@ -1113,7 +1112,7 @@ obStatusText.SetFont("s8 c00FF00","Segoe UI")
 MainGui.Add("Text","x25 y318 w165"," F7 — Empty OB  (F7 at trans)").SetFont("s9 c888888 Italic","Segoe UI")
 global obDownText := MainGui.Add("Text","x190 y318 w55","")
 obDownText.SetFont("s8 c00FF00","Segoe UI")
-MainGui.Add("Text","x25 y332 w185"," F8 — Mammoth Drums").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y332 w185"," F8 — BG Mammoth Drums").SetFont("s9 c888888 Italic","Segoe UI")
 MainGui.Add("Text","x25 y346 w185"," F9 — BG Autoclick").SetFont("s9 c888888 Italic","Segoe UI")
 MainGui.Add("Text","x25 y360 w160"," F10 — Quick Popcorn").SetFont("s9 c888888 Italic","Segoe UI")
 global pcF10StatusTxt := MainGui.Add("Text","x150 y360 w60","")
@@ -1859,7 +1858,7 @@ iniCustomEdit.SetFont("s8 c000000", "Segoe UI")
 iniSaveCustomBtn := DarkBtn(MainGui, "x22 y300 w96 h20", "Save Custom INI", _RED_BGR, _DK_BG, -11, true)
 iniSaveCustomBtn.OnEvent("Click", IniSaveCustomCommand)
 
-hatchSaveBtn := DarkBtn(MainGui, "x22 y324 w96 h20", "Save Hatch", _RED_BGR, _DK_BG, -11, true)
+hatchSaveBtn := DarkBtn(MainGui, "x22 y324 w70 h20", "Save Hatch", _RED_BGR, _DK_BG, -11, true)
 hatchSaveBtn.OnEvent("Click", SaveHatchSettings)
 
 ; --- AUTO PIN / NVIDIA FILTER ---
@@ -1874,6 +1873,7 @@ MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global nfEnableBtn := MainGui.Add("CheckBox", "x136 y344 w120 h20", "NVIDIA Filter")
 nfEnableBtn.Value := nfEnabled
 nfEnableBtn.OnEvent("Click", NFToggle)
+
 
 PinToggle(*) {
     global pinAutoOpen, pinEnableBtn
@@ -1919,6 +1919,7 @@ imprintInvKeyEdit.OnEvent("Change", ImprintOnInvKeyChange)
 global imprintResizeBtn := DarkBtn(MainGui, "x326 y252 w52 h20", "Resize", _RED_BGR, _DK_BG, -10, false)
 imprintResizeBtn.OnEvent("Click", ImprintToggleResize)
 
+
 MainGui.SetFont("s8 c888888 Italic", "Segoe UI")
 global imprintStatusTxt := MainGui.Add("Text", "x242 y278 w190 h16", "Press Start then R=read Q=auto")
 
@@ -1935,6 +1936,7 @@ ufAddBtn := DarkBtn(MainGui, "x374 y322 w18 h21", "+", _RED_BGR, _DK_BG, -11, tr
 ufAddBtn.OnEvent("Click", UfAddFilter)
 ufDelBtn := DarkBtn(MainGui, "x394 y322 w18 h21", "-", _RED_BGR, _DK_BG, -11, true)
 ufDelBtn.OnEvent("Click", UfRemoveFilter)
+
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -3594,7 +3596,7 @@ ToggleMammothScript(*) {
 
 StartMammothScript() {
     global runMammothScript := true
-    ToolTip(" Mammoth Drums RUNNING`nF8 = Stop", 0, 0)
+    ToolTip(" BG Mammoth Drums RUNNING`nF8 = Stop", 0, 0)
     if WinExist(arkWindow)
         WinActivate(arkWindow)
     SetControlDelay(-1)
@@ -9806,6 +9808,7 @@ OBStopAll(hideGui := true) {
     OBCharUnregisterSvrKeys()
     try obStatusText.Value := ""
     ToolTip()
+    ToolTip(,,,2)
     if (hideGui) {
         MainGui.Hide()
         global guiVisible := false
@@ -9884,8 +9887,6 @@ OBUploadCycle() {
         if (nextSvr != "" && nextSvr != "2386")
             customSvr := nextSvr
         if (customSvr = "")
-            nextLabel := "2386"
-        else if (obCharLastDest = customSvr)
             nextLabel := "2386"
         else
             nextLabel := customSvr
@@ -10068,7 +10069,7 @@ OBUploadCharacterThread() {
     global ServerJoinOffsetX, ServerJoinOffsetY
     global ServerNumberEdit, GameWindow, GameWidth, GameHeight
     global widthmultiplier, heightmultiplier
-    global obCharCustomServer, obCharLastDest
+    global obCharCustomServer
     global nfEnabled, obUploadMode
 
     global obCharTravelX := Round(1271 * widthmultiplier)
@@ -10096,12 +10097,10 @@ OBUploadCharacterThread() {
 
     if (customSvr = "") {
         serverNum := "2386"
-    } else if (obCharLastDest = customSvr) {
-        serverNum := "2386"
     } else {
         serverNum := customSvr
     }
-    obLog.Push("Server: " serverNum "  custom=" obCharCustomServer "  lastDest=" obCharLastDest)
+    obLog.Push("Server: " serverNum "  custom=" obCharCustomServer)
 
     OBSetStatus("Waiting for transmitter...")
     waitCount := 0
@@ -10159,7 +10158,8 @@ OBUploadCharacterThread() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Upload timer: " tm ":" Format("{:02}", ts) " — F to manage items (" modeLabel ")")
-                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts) "`n F to manage items  |  F1 = cancel", 0, 0)
+                ToolTip(" F to manage items  |  F1 = cancel", 0, 0)
+                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
         } catch as ocrErr {
@@ -10204,7 +10204,8 @@ OBUploadCharacterThread() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Timer " tm ":" Format("{:02}", ts) " still active — F to manage items (" modeLabel ")")
-                ToolTip(" Timer " tm ":" Format("{:02}", ts) " still active`n F to manage items  |  F1 = cancel", 0, 0)
+                ToolTip(" Timer still active — F to manage items  |  F1 = cancel", 0, 0)
+                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
             obLog.Push("No timer — proceeding to Travel")
@@ -10342,12 +10343,12 @@ OBUploadCharacterThread() {
     Sleep(300)
     obLog.Push("Clicked session x2 (" obcSessionX "," obcSessionY ")")
 
-    OBSetStatus("Joining server " serverNum "...")
     joinConfirmed := false
     itemsBlocked := false
     joinAttempts := 0
     while (obUploadRunning && joinAttempts < 30) {
         joinAttempts++
+        ToolTip()  ; hide tooltip before OCR scan
         DllCall("SetCursorPos", "int", obcJoinX, "int", obcJoinY)
         Sleep(50)
         Click()
@@ -10355,14 +10356,14 @@ OBUploadCharacterThread() {
         try {
             jText := OCR.FromRect(0, 0, A_ScreenWidth, A_ScreenHeight, {scale: 1}).Text
             jLower := StrLower(jText)
-            if (InStr(jText, "Joining") || InStr(jText, "joining")) {
-                joinConfirmed := true
-                obLog.Push("Join confirmed by OCR after " joinAttempts " attempts: [" jText "]")
-                break
-            }
             if (InStr(jLower, "items not allowed") || InStr(jLower, "not ready for upload") || InStr(jLower, "can not be transferred")) {
                 itemsBlocked := true
                 obLog.Push("Items Not Allowed popup detected after " joinAttempts " attempts: [" SubStr(jText, 1, 200) "]")
+                break
+            }
+            if (InStr(jText, "Joining") || InStr(jText, "joining")) {
+                joinConfirmed := true
+                obLog.Push("Join confirmed by OCR after " joinAttempts " attempts: [" jText "]")
                 break
             }
         }
@@ -10395,17 +10396,26 @@ OBUploadCharacterThread() {
         return
     }
 
-    if (!joinConfirmed)
-        obLog.Push("Join not confirmed by OCR after " joinAttempts " attempts — proceeding anyway")
+    if (!joinConfirmed) {
+        obLog.Push("Join not confirmed by OCR after " joinAttempts " attempts — re-arming (server NOT marked as last dest)")
+        global obUploadRunning := false
+        global obUploadArmed := true
+        global obUploadMode := 3
+        global obCharTimerStage := 0
+        OBSetStatus("Join failed — press F at transmitter to retry")
+        ToolTip(" Join failed — server not marked`n Press F at transmitter to retry", 0, 0)
+        SetTimer(() => ToolTip(), -4000)
+        return
+    }
     Sleep(1000)
 
-    global obCharLastDest := serverNum
     global obUploadRunning := false
     global obUploadArmed := false
     global obUploadMode := 0
     OBCharUnregisterSvrKeys()
-    obLog.Push("Upload Char complete → server " serverNum " — mode OFF (lastDest=" obCharLastDest " preserved)")
+    obLog.Push("Upload Char complete → server " serverNum " — mode OFF")
     OBSetStatus("")
+    ToolTip(,,,2)
     ToolTip(" Upload Char done → " serverNum "`n F6 to re-enable  |  F1 = UI", 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
@@ -10431,7 +10441,7 @@ OBCharSaveServerSilent() {
 
 OBCharRestoreTooltip() {
     global obUploadMode, obUploadArmed, obUploadRunning, guiVisible
-    global obCharCustomServer, obCharLastDest, ServerNumberEdit, svrList
+    global obCharCustomServer, ServerNumberEdit, svrList
     if (obUploadMode != 3 || !obUploadArmed || obUploadRunning || guiVisible)
         return
     nextSvr := ""
@@ -10440,8 +10450,6 @@ OBCharRestoreTooltip() {
     if (nextSvr != "" && nextSvr != "2386")
         customSvr := nextSvr
     if (customSvr = "")
-        nextLabel := "2386"
-    else if (obCharLastDest = customSvr)
         nextLabel := "2386"
     else
         nextLabel := customSvr
@@ -10495,7 +10503,7 @@ OBCharSvrDown(*) {
 }
 
 OBCharSvrCycle(dir) {
-    global svrList, ServerNumberEdit, obCharSvrIdx, obCharLastDest
+    global svrList, ServerNumberEdit, obCharSvrIdx
     if (svrList.Length = 0) {
         ToolTip(" No servers in list — add via Tab 1", 0, 0)
         SetTimer(() => ToolTip(), -1500)
@@ -10514,8 +10522,6 @@ OBCharSvrCycle(dir) {
     if (nextSvr != "" && nextSvr != "2386")
         customSvr := nextSvr
     if (customSvr = "")
-        nextLabel := "2386"
-    else if (obCharLastDest = customSvr)
         nextLabel := "2386"
     else
         nextLabel := customSvr
@@ -15055,18 +15061,6 @@ $F1:: {
         try Hotkey("$]", "Off")
         global quickFeedMode         := 0
         global overcapAccumMs        := 0
-        if (obUploadMode = 3 && obUploadArmed && !obUploadRunning) {
-            global obCharTimerStage := 0
-            OBCharUnregisterSvrKeys()
-            MainGui.Show("x177 y330")
-            Sleep(100)
-            MouseMove(177 + 225, 330 + 204, 0)
-            ToolTip()
-            ToolTip(,,,1)
-            ToolTip(,,,2)
-            global guiVisible := true
-            return
-        }
         OBStopAll(false)
         OBDownStopAll(false)
         if (runOvercapScript)
@@ -15099,8 +15093,6 @@ $F1:: {
             if (nextSvr != "" && nextSvr != "2386")
                 customSvr := nextSvr
             if (customSvr = "")
-                nextLabel := "2386"
-            else if (obCharLastDest = customSvr)
                 nextLabel := "2386"
             else
                 nextLabel := customSvr
