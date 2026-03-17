@@ -273,6 +273,7 @@ global obCharTravelY      := 0
 global obCharCustomServer := ""
 global obCharLastDest     := ""
 global obCharSvrIdx       := 0
+global obCharTimerStage   := 0
 
 ; --- OB Download ---
 global obDownloadArmed    := false
@@ -9769,6 +9770,31 @@ OBSetStatus(msg) {
     ToolTip(" Auto Upload — " msg "`nF6 = next mode  |  F1 = Show UI  |  Q = Stop", 0, 20)
 }
 
+OBWaitInvClose(reason) {
+    global obLog, obUploadArmed, obUploadMode, obConfirmPixX, obConfirmPixY
+    modeLabel := (obUploadMode = 1) ? "Cryos" : (obUploadMode = 2) ? "Tek+Cryos" : "Upload Char"
+    OBSetStatus(reason " — manage items, close inv when ready")
+    obLog.Push("Polling obConfirmPix for inv close (" reason ")")
+    timeout := 600
+    while (obUploadArmed && timeout > 0) {
+        try {
+            if !NFSearchTol(&px, &py, obConfirmPixX, obConfirmPixY, obConfirmPixX, obConfirmPixY, "0xFFFFFF", 15) {
+                obLog.Push("Inv closed detected — ready for F")
+                OBSetStatus("Press F at transmitter (" modeLabel ")")
+                ToolTip(" Press F at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+                return
+            }
+        }
+        Sleep(200)
+        timeout--
+    }
+    if (timeout <= 0) {
+        obLog.Push("Inv close poll timed out (120s)")
+        OBSetStatus("Press F at transmitter (" modeLabel ")")
+        ToolTip(" Press F at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+    }
+}
+
 OBStopAll(hideGui := true) {
     global obUploadMode := 0
     global obUploadArmed := false
@@ -9776,6 +9802,7 @@ OBStopAll(hideGui := true) {
     global obUploadPaused := false
     global obActiveFilter := ""
     global obUploadFilter := ""
+    global obCharTimerStage := 0
     OBCharUnregisterSvrKeys()
     try obStatusText.Value := ""
     ToolTip()
@@ -9841,6 +9868,7 @@ OBUploadCycle() {
         OBSetStatus("Tek+Cryos")
     } else if (obUploadMode = 3) {
         global obUploadArmed := true
+        global obCharTimerStage := 0
         global obCharSvrIdx := 0
         nextSvr := ""
         try nextSvr := ServerNumberEdit.Text
@@ -10073,8 +10101,6 @@ OBUploadCharacterThread() {
     } else {
         serverNum := customSvr
     }
-    global obCharLastDest := serverNum
-
     obLog.Push("Server: " serverNum "  custom=" obCharCustomServer "  lastDest=" obCharLastDest)
 
     OBSetStatus("Waiting for transmitter...")
@@ -10102,8 +10128,90 @@ OBUploadCharacterThread() {
     }
     obLog.Push("Transmitter detected after " (waitCount * 16) "ms  pixel=(" obConfirmPixX "," obConfirmPixY ")")
 
-    if (OBCheckUploadTimer())
+    if (obCharTimerStage = 0) {
+        try {
+            scanX := obOcrX[5]
+            scanY := obOcrY[5]
+            scanW := obOcrW[5]
+            scanH := obOcrH[5]
+            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 2}).Text
+            obLog.Push("Timer OCR (" scanX "," scanY " " scanW "x" scanH "): [" SubStr(tOcr, 1, 200) "]")
+            maxSec := 0
+            startPos := 1
+            while RegExMatch(tOcr, "(\d{1,2}):(\d{2})", &tMatch, startPos) {
+                mins := Integer(tMatch[1])
+                secs := Integer(tMatch[2])
+                if (mins <= 15 && secs < 60) {
+                    total := mins * 60 + secs
+                    if (total > maxSec)
+                        maxSec := total
+                }
+                startPos := tMatch.Pos + tMatch.Len
+            }
+            if (maxSec > 0) {
+                global obCharTimerStage := 1
+                tm := maxSec // 60
+                ts := Mod(maxSec, 60)
+                obLog.Push("Timer " tm ":" Format("{:02}", ts) " — closing transmitter, re-armed")
+                Send("{Escape}")
+                Sleep(200)
+                modeLabel := "Upload Char"
+                global obUploadRunning := false
+                global obUploadArmed := true
+                OBSetStatus("Upload timer: " tm ":" Format("{:02}", ts) " — F to manage items (" modeLabel ")")
+                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts) "`n F to manage items  |  F1 = cancel", 0, 0)
+                return
+            }
+        } catch as ocrErr {
+            obLog.Push("Timer OCR failed: " ocrErr.Message)
+        }
+    } else if (obCharTimerStage = 1) {
+        obLog.Push("Stage 1 — inv management, polling for inv close")
+        global obCharTimerStage := 2
+        global obUploadRunning := false
+        global obUploadArmed := true
+        SetTimer(OBWaitInvClose.Bind("Timer items"), -1)
         return
+    } else {
+        obLog.Push("Stage 2 — re-checking timer before Travel")
+        try {
+            scanX := obOcrX[5]
+            scanY := obOcrY[5]
+            scanW := obOcrW[5]
+            scanH := obOcrH[5]
+            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 2}).Text
+            obLog.Push("Re-check OCR: [" SubStr(tOcr, 1, 200) "]")
+            maxSec := 0
+            startPos := 1
+            while RegExMatch(tOcr, "(\d{1,2}):(\d{2})", &tMatch, startPos) {
+                mins := Integer(tMatch[1])
+                secs := Integer(tMatch[2])
+                if (mins <= 15 && secs < 60) {
+                    total := mins * 60 + secs
+                    if (total > maxSec)
+                        maxSec := total
+                }
+                startPos := tMatch.Pos + tMatch.Len
+            }
+            if (maxSec > 0) {
+                global obCharTimerStage := 1
+                tm := maxSec // 60
+                ts := Mod(maxSec, 60)
+                obLog.Push("Timer still active " tm ":" Format("{:02}", ts) " — back to stage 1")
+                Send("{Escape}")
+                Sleep(200)
+                modeLabel := "Upload Char"
+                global obUploadRunning := false
+                global obUploadArmed := true
+                OBSetStatus("Timer " tm ":" Format("{:02}", ts) " still active — F to manage items (" modeLabel ")")
+                ToolTip(" Timer " tm ":" Format("{:02}", ts) " still active`n F to manage items  |  F1 = cancel", 0, 0)
+                return
+            }
+            obLog.Push("No timer — proceeding to Travel")
+        } catch as ocrErr {
+            obLog.Push("Re-check OCR failed: " ocrErr.Message)
+        }
+    }
 
     OBSetStatus("Clicking Travel to Another Server...")
     Sleep(200)
@@ -10236,6 +10344,7 @@ OBUploadCharacterThread() {
 
     OBSetStatus("Joining server " serverNum "...")
     joinConfirmed := false
+    itemsBlocked := false
     joinAttempts := 0
     while (obUploadRunning && joinAttempts < 30) {
         joinAttempts++
@@ -10245,9 +10354,15 @@ OBUploadCharacterThread() {
         Sleep(600)
         try {
             jText := OCR.FromRect(0, 0, A_ScreenWidth, A_ScreenHeight, {scale: 1}).Text
+            jLower := StrLower(jText)
             if (InStr(jText, "Joining") || InStr(jText, "joining")) {
                 joinConfirmed := true
                 obLog.Push("Join confirmed by OCR after " joinAttempts " attempts: [" jText "]")
+                break
+            }
+            if (InStr(jLower, "items not allowed") || InStr(jLower, "not ready for upload") || InStr(jLower, "can not be transferred")) {
+                itemsBlocked := true
+                obLog.Push("Items Not Allowed popup detected after " joinAttempts " attempts: [" SubStr(jText, 1, 200) "]")
                 break
             }
         }
@@ -10265,10 +10380,26 @@ OBUploadCharacterThread() {
             Sleep(300)
         }
     }
+
+    if (itemsBlocked) {
+        obLog.Push("Exiting transmitter (Esc x2)")
+        Send("{Escape}")
+        Sleep(300)
+        Send("{Escape}")
+        Sleep(300)
+        global obUploadRunning := false
+        global obUploadArmed := true
+        global obUploadMode := 3
+        global obCharTimerStage := 1
+        OBSetStatus("Items Not Allowed — F to manage items")
+        return
+    }
+
     if (!joinConfirmed)
         obLog.Push("Join not confirmed by OCR after " joinAttempts " attempts — proceeding anyway")
     Sleep(1000)
 
+    global obCharLastDest := serverNum
     global obUploadRunning := false
     global obUploadArmed := false
     global obUploadMode := 0
@@ -14925,6 +15056,7 @@ $F1:: {
         global quickFeedMode         := 0
         global overcapAccumMs        := 0
         if (obUploadMode = 3 && obUploadArmed && !obUploadRunning) {
+            global obCharTimerStage := 0
             OBCharUnregisterSvrKeys()
             MainGui.Show("x177 y330")
             Sleep(100)
@@ -16087,6 +16219,15 @@ ImprintOnReadAndProcess() {
     }
 }
 
+ImHasFeedPrompt(text, foodName) {
+    if (text = "" || !InStr(text, "Feed") || !InStr(text, foodName))
+        return false
+    t := StrLower(text)
+    if (InStr(t, "[e]") || InStr(t, "(e)") || InStr(t, "ie]") || InStr(t, "[e") || InStr(t, "e]") || InStr(t, " e "))
+        return true
+    return false
+}
+
 ImprintProcessFood(foodName, ocrText := "") {
     global imprintInventoryKey, arkwindow, imprintLog
     global imprintInvPixX, imprintInvPixY, imprintSearchX, imprintSearchY, imprintResultX, imprintResultY
@@ -16104,7 +16245,7 @@ ImprintProcessFood(foodName, ocrText := "") {
     CoordMode("Pixel", "Screen")
     CoordMode("Mouse", "Screen")
 
-    if (ocrText != "" && InStr(ocrText, "[E]") && InStr(ocrText, "Feed") && InStr(ocrText, foodName)) {
+    if (ocrText != "" && ImHasFeedPrompt(ocrText, foodName)) {
         ImLog("[E] Feed [" foodName "] already visible — pressing E directly")
         Send("{e}")
         Sleep(200)
@@ -16179,7 +16320,7 @@ ImprintProcessFood(foodName, ocrText := "") {
     while (scanWait < 10) {
         try {
             eText := OCR.FromRect(imprintSnapX, imprintSnapY, imprintSnapW, imprintSnapH, {scale: 3}).Text
-            if (InStr(eText, "[E]") && InStr(eText, "Feed") && InStr(eText, foodName)) {
+            if (ImHasFeedPrompt(eText, foodName)) {
                 feedReady := true
                 ImLog("[E] Feed [" foodName "] detected: [" eText "]")
                 break
