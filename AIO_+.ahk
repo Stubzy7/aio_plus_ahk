@@ -5982,7 +5982,13 @@ GuidedActionStepNext(*) {
     if (guidedActionType = "popcorn") {
         guidedWizGui.Destroy()
         global guidedWizGui := ""
-        GuidedShowDropKeyPrompt("popcorn")
+        savedDrop := ""
+        try savedDrop := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
+        if (savedDrop != "") {
+            GuidedShowPopcornStep()
+        } else {
+            GuidedShowDropKeyPrompt("popcorn")
+        }
         return
     }
     guidedWizGui.Destroy()
@@ -7403,7 +7409,13 @@ ComboStartWizard(*) {
     if (pcDropKey = "") {
         global pcDropKey := "g"
     }
-    GuidedShowDropKeyPrompt("combo")
+    savedDrop := ""
+    try savedDrop := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
+    if (savedDrop != "") {
+        ComboShowStep1()
+    } else {
+        GuidedShowDropKeyPrompt("combo")
+    }
 }
 
 ComboShowStep1() {
@@ -7437,8 +7449,7 @@ ComboStep1Next(*) {
     pcCount := Integer(comboPC_CountEdit.Value)
     if (pcCount < 0) pcCount := 0
     if (pcCount > 10) pcCount := 10
-    comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     if (pcCount = 0) {
         global comboPopcornFilters := [""]
         ComboShowStep3()
@@ -7488,13 +7499,16 @@ ComboStep2Next(*) {
     for , ed in comboPcEdits {
         comboPopcornFilters.Push(Trim(ed.Value))
     }
-    comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowStep3()
 }
 
 ComboShowStep3() {
     global comboWizGui
+    try {
+        if (comboWizGui != "")
+            comboWizGui.Destroy()
+    }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 3")
     comboWizGui.BackColor := "1A1A1A"
     comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
@@ -7516,8 +7530,7 @@ ComboShowStep3() {
 
 ComboStep3Back(*) {
     global comboWizGui, comboPopcornFilters
-    try comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowStep2(comboPopcornFilters.Length)
 }
 
@@ -7526,13 +7539,16 @@ ComboStep3Next(*) {
     mfCount := Integer(comboMF_CountEdit.Value)
     if (mfCount < 1) mfCount := 1
     if (mfCount > 10) mfCount := 10
-    comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowStep4(mfCount)
 }
 
 ComboShowStep4(mfCount) {
     global comboWizGui
+    try {
+        if (comboWizGui != "")
+            comboWizGui.Destroy()
+    }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 4")
     comboWizGui.BackColor := "1A1A1A"
     comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
@@ -7561,8 +7577,7 @@ ComboShowStep4(mfCount) {
 
 ComboStep4Back(*) {
     global comboWizGui
-    try comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowStep3()
 }
 
@@ -7579,8 +7594,7 @@ ComboStep4Next(*) {
         SetTimer(() => ToolTip(), -2000)
         return
     }
-    comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     global comboTakeCount := 0
     global comboTakeFilter := ""
     ComboShowSaveDialog()
@@ -7588,6 +7602,10 @@ ComboStep4Next(*) {
 
 ComboShowStep5() {
     global comboWizGui
+    try {
+        if (comboWizGui != "")
+            comboWizGui.Destroy()
+    }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 5")
     comboWizGui.BackColor := "1A1A1A"
     comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
@@ -7616,8 +7634,7 @@ ComboShowStep5() {
 
 ComboStep5Back(*) {
     global comboWizGui, comboMagicFFilters
-    try comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowStep4(comboMagicFFilters.Length)
 }
 
@@ -7629,13 +7646,16 @@ ComboStep5Next(*) {
         global comboTakeCount := 0
     if (comboTakeCount > 36)
         global comboTakeCount := 36
-    comboWizGui.Destroy()
-    global comboWizGui := ""
+    try comboWizGui.Hide()
     ComboShowSaveDialog()
 }
 
 ComboShowSaveDialog() {
     global comboWizGui, comboPopcornFilters, comboMagicFFilters, comboTakeCount, comboTakeFilter
+    try {
+        if (comboWizGui != "")
+            comboWizGui.Destroy()
+    }
     comboWizGui := Gui("+AlwaysOnTop", "Save Popcorn+Magic-F Combo")
     comboWizGui.BackColor := "1A1A1A"
     comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
@@ -7998,6 +8018,7 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
     ToolTip(ComboBuildTooltip(m, "dropping", comboFilterIdx, pcFilters, mfFilters), 0, 0)
     MacroLog("ComboPlay: drop grid started  rows=" pcRows " cols=" pcColumns " dropKey=" pcDropKey " dropSleep=" pcDropSleep)
     passNum := 0
+    ocrFails := 0
     while (macroPlaying && comboRunning) {
         passNum++
         Loop pcRows {
@@ -8028,6 +8049,29 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
             }
         }
         MacroLog("ComboPlay: drop grid pass " passNum " done")
+        if (passNum >= 2) {
+            chk := PcCheckStorageEmpty()
+            MacroLog("ComboPlay: drop pass " passNum " OCR=" chk)
+            if (chk = 0) {
+                MacroLog("ComboPlay: storage empty after pass " passNum " — done")
+                Send("{Escape}")
+                Sleep(300)
+                ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                return
+            }
+            if (chk = -1) {
+                ocrFails++
+                if (ocrFails >= 6) {
+                    MacroLog("ComboPlay: 6 OCR fails — assuming empty")
+                    Send("{Escape}")
+                    Sleep(300)
+                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    return
+                }
+            } else {
+                ocrFails := 0
+            }
+        }
         Sleep(5)
     }
 }

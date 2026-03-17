@@ -6,6 +6,18 @@ PORT items from the Python version applied to `AIO_+.ahk`.
 
 ## 2026-03-18
 
+### Combo Popcorn+Magic-F: OCR empty storage detection
+- Drop loop now checks `PcCheckStorageEmpty()` after each pass, matching standalone popcorn behavior.
+
+### Combo wizard: skip drop key prompt if already set
+- Checks INI for saved drop key — skips prompt if present. Same for guided popcorn wizard.
+
+### Combo wizard: fix step dialogs not closing
+- Step transitions use `Hide()` + destroy guard to prevent dialogs lingering.
+
+### BG Mammoth Drums label
+- GUI label and tooltip updated to "BG Mammoth Drums" to match Python.
+
 ### Upload char: Items Not Allowed detection fix
 - OCR now checks for "Items Not Allowed" **before** "Joining" — prevents false join confirmation when both texts appear in same scan.
 - Tooltip hidden before OCR scan to avoid own tooltip text polluting results.
