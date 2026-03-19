@@ -37,7 +37,6 @@ global magicFPresetIdx      := 1
 global mfSearchBarClickMs  := 30
 global mfFilterSettleMs    := 100
 global mfTransferSettleMs  := 100
-; Preload Timings to INI for new users
 if (!FileExist(A_ScriptDir "\AIO_config.ini") || IniRead(A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs", "") = "") {
     IniWrite(30, A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs")
     IniWrite(100, A_ScriptDir "\AIO_config.ini", "Timings", "FilterSettleMs")
@@ -293,7 +292,6 @@ global obDownItemDelayMax  := 3000
 global obDownBarSettleMs   := 12000
 
 ; --- OB OCR Regions ---
-; 1=Upload Slot  2=Upload Popup  3=Download Count  4=Download Popup  5=Timer
 global obOcrResizing   := false
 global obOcrTarget     := 0
 global obOcrOverlays   := ""
@@ -547,6 +545,7 @@ global macroSaveGui          := ""
 global macroRepeatGui        := ""
 global macroDetectedMouse    := ""
 global macroRepeatKeyIdx     := 1
+global _macroBgInterval      := 1000
 global macroSelectedIdx      := 1
 global macroArmed            := false
 global macroSpeedDirty       := false
@@ -797,7 +796,6 @@ global _darkBtns := Map()
 
 DarkBtn(gui, options, text, fg := 0x4444FF, bg := 0x1A1A1A, fontSize := -12, bold := true) {
     btn := gui.Add("Button", options, text)
-    ; Strip theme + set owner-draw
     DllCall("uxtheme\SetWindowTheme", "Ptr", btn.Hwnd, "Str", "", "Str", "")
     style := DllCall("GetWindowLong", "Ptr", btn.Hwnd, "Int", -16, "Int")
     DllCall("SetWindowLong", "Ptr", btn.Hwnd, "Int", -16, "Int", (style & ~0xF) | 0xB)
@@ -813,7 +811,6 @@ DarkBtnText(btn, newText) {
     DllCall("InvalidateRect", "Ptr", btn.Hwnd, "Ptr", 0, "Int", 1)
 }
 
-; BGR color constants for DarkBtn
 global _RED_BGR  := 0x4444FF    ; #FF4444
 global _GRAY_BGR := 0xDDDDDD    ; #DDDDDD
 global _DK_BG    := 0x1A1A1A    ; #1A1A1A
@@ -822,13 +819,11 @@ ModeSelectTab := MainGui.Add("Tab2","x-3 y0 w460 h440 Background000000",["JoinSi
 ModeSelectTab.SetFont("s9 cFFFFFF Bold", "Segoe UI")
 ModeSelectTab.OnEvent("Change", OnTabChange)
 
-; ── Dark Theme: Owner-drawn tab headers ──
 global _dtTabHwnd := ModeSelectTab.Hwnd
 _dtTabStyle := DllCall("GetWindowLong", "Ptr", _dtTabHwnd, "Int", -16, "Int")
 DllCall("SetWindowLong", "Ptr", _dtTabHwnd, "Int", -16, "Int", _dtTabStyle | 0x2000)
 DllCall("uxtheme\SetWindowTheme", "Ptr", _dtTabHwnd, "Str", "", "Str", "")
 
-; ── Dark Theme: WM_DRAWITEM handler for tabs + buttons ──
 OnMessage(0x002B, _GGDrawItem)
 
 _GGDrawItem(wParam, lParam, msg, hwnd) {
@@ -985,17 +980,15 @@ SimBChk.OnEvent("Click", SimSelectB)
 StartSimButton := DarkBtn(MainGui, "x130 y177 w90 h28", "Start", _RED_BGR, _DK_BG, -12, true)
 StartSimButton.OnEvent("Click", AutoSimButtonToggle)
 
-; ── Delta spiral — right of Start button, clipped at GUI edge ──
+; ── Delta ──
 DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
 _dSI := Buffer(24, 0)
 NumPut("UInt", 1, _dSI, 0)
 DllCall("gdiplus\GdiplusStartup", "Ptr*", &_dToken := 0, "Ptr", _dSI, "Ptr", 0)
 _dR := 85, _dSteps := 32, _dSlide := 0.068, _dOpacity := 1.0
 _dA0 := 1.5707963268
-; Bitmap positioned in the empty right column, clipping at GUI right edge
 _dBmpX := 275, _dBmpY := 105
 _dBmpW := 175, _dBmpH := 145
-; Center at GUI (350, 160)
 _dCX := 350 - _dBmpX, _dCY := 160 - _dBmpY
 
 DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", _dBmpW, "Int", _dBmpH, "Int", 0, "Int", 0x26200A, "Ptr", 0, "Ptr*", &_dBmp := 0)
@@ -1020,7 +1013,6 @@ Loop _dSteps {
     _pw := Max(0.5, 2.0 - _f * 1.2)
     _dSegs := [[_dP1x,_dP1y,_dP2x,_dP2y],[_dP2x,_dP2y,_dP3x,_dP3y],[_dP3x,_dP3y,_dP1x,_dP1y]]
     for , _s in _dSegs {
-        ; Dark edges (blends into black bg) → brighter center
         if (_f < 0.10)
             _c := 0x550808
         else if (_f < 0.20)
@@ -1122,14 +1114,13 @@ MainGui.Add("Text","x25 y374 w160"," F12 — Grab My Kit").SetFont("s9 c888888 I
 global gmkStatusTxt := MainGui.Add("Text","x150 y374 w60","")
 gmkStatusTxt.SetFont("s8 c00FF00","Segoe UI")
 
-; GG foreground layer — Delta spiral + gradient Slant Relief art (rendered as bitmap)
+; GG foreground layer — Delta + gradient Relief (rendered as bitmap)
 ; ── GDI+ startup for GG art ──
 DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
 _ggSI := Buffer(24, 0)
 NumPut("UInt", 1, _ggSI, 0)
 DllCall("gdiplus\GdiplusStartup", "Ptr*", &_ggToken := 0, "Ptr", _ggSI, "Ptr", 0)
 
-; Bitmap region: covers delta + GG art area
 _ggBmpX := 240, _ggBmpY := 268, _ggBmpW := 210, _ggBmpH := 140
 
 DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", _ggBmpW, "Int", _ggBmpH, "Int", 0, "Int", 0x26200A, "Ptr", 0, "Ptr*", &_ggBmp := 0)
@@ -1137,12 +1128,11 @@ DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", _ggBmp, "Ptr*", &_ggG := 0
 DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", _ggG, "Int", 4)
 DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", _ggG, "Int", 5)
 
-; Fill with GUI background (black)
 DllCall("gdiplus\GdipCreateSolidFill", "UInt", 0xFF000000, "Ptr*", &_ggBr := 0)
 DllCall("gdiplus\GdipFillRectangleI", "Ptr", _ggG, "Ptr", _ggBr, "Int", 0, "Int", 0, "Int", _ggBmpW, "Int", _ggBmpH)
 DllCall("gdiplus\GdipDeleteBrush", "Ptr", _ggBr)
 
-; ── PART 2: GG Relief text ──
+; ── PART 2: GG Relief ──
 DllCall("gdiplus\GdipCreateFontFamilyFromName", "WStr", "Consolas", "Ptr", 0, "Ptr*", &_ggFamily := 0)
 DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &_ggFmt := 0)
 DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", _ggFmt, "Int", 0)
@@ -1201,7 +1191,6 @@ DllCall("gdiplus\GdipCreateHBITMAPFromBitmap", "Ptr", _ggBmp, "Ptr*", &_ggHBmp :
 DllCall("gdiplus\GdipDeleteGraphics", "Ptr", _ggG)
 DllCall("gdiplus\GdipDisposeImage", "Ptr", _ggBmp)
 
-; Save to temp, load into Picture, delete — no file left on disk
 _ggPath := A_Temp "\gg_delta_bg.bmp"
 _ggDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
 _ggOld := DllCall("SelectObject", "Ptr", _ggDC, "Ptr", _ggHBmp, "Ptr")
@@ -1995,7 +1984,6 @@ MainGui.Add("Text", "x12 y294 w425 h14 Center", "F1 = Stop / UI  |  Only ► mac
 WinActivate(arkwindow)
 MainGui.Show("x177 y330 w450 h432")
 
-; Re-apply BS_OWNERDRAW on all dark buttons after Show (Tab2 may reset styles)
 for _dbHwnd, _dbInfo in _darkBtns {
     _dbS := DllCall("GetWindowLong", "Ptr", _dbHwnd, "Int", -16, "Int")
     if ((_dbS & 0xF) != 0xB) {
@@ -2898,7 +2886,6 @@ RunAutoLvl(*) {
     global runAutoLvlScript, autoLvlCycleSlots, autoLvlCycleIdx, autoLvlCombineChk
     
     if (runAutoLvlScript) {
-        ; Stop — unregister Q and reset
         global runAutoLvlScript := false
         try Hotkey("$q", "Off")
         DarkBtnText(StartAutoLvlButton, "START")
@@ -2906,8 +2893,6 @@ RunAutoLvl(*) {
         return
     }
     
-    ; Build cycle slots from stats with points > 0
-    ; Each slot: {name: "HP +60", stats: [{edit: ref, clickY: scaled, pixX: x, pixY: y}]}
     autoLvlCycleSlots := []
     noOxyDiff := NoOxyCheckBox.Value ? (50 * heightmultiplier) : 0
     
@@ -2925,14 +2910,15 @@ RunAutoLvl(*) {
             activeStats.Push(sd)
     }
     
-    if (activeStats.Length = 0) {
+    if (activeStats.Length = 0 && !AutoSaddleCheckBox.Value) {
         ToolTip(" No stats set — enter point values first", 0, 0)
         SetTimer(() => ToolTip(), -2000)
         return
     }
-    
-    if (autoLvlCombineChk.Value || activeStats.Length = 1) {
-        ; Single slot with all active stats combined
+
+    if (activeStats.Length = 0 && AutoSaddleCheckBox.Value) {
+        autoLvlCycleSlots.Push({label: "Saddle only", stats: []})
+    } else if (autoLvlCombineChk.Value || activeStats.Length = 1) {
         names := []
         for s in activeStats
             names.Push(s.name " +" s.edit.Value)
@@ -2953,7 +2939,6 @@ RunAutoLvl(*) {
     global guiVisible := false
     DarkBtnText(StartAutoLvlButton, "STOP")
     
-    ; Register Q for cycling (only if multiple slots)
     if (autoLvlCycleSlots.Length > 1)
         Hotkey("$q", AutoLvlQCycle, "On")
     
@@ -3016,7 +3001,6 @@ autoLvLFpressed() {
     }
     
     if (autolvlOpenInv) {
-        ; Level only the stats in the current cycle slot
         for s in slot.stats {
             pts := s.edit.Value
             if (pts <= 0)
@@ -4470,14 +4454,27 @@ MacroDiscardRecording(*) {
 }
 
 MacroDetectSaveHotkey(*) {
-    global macroHkEdit
-    macroHkEdit.Value := "..."
+    global macroHkEdit, macroDetectedMouse
+    macroHkEdit.Value := "press any key or click..."
+    global macroDetectedMouse := ""
+    Sleep(300)
+    try Hotkey("~*RButton", MacroDetectRMouse, "On")
+    try Hotkey("~*LButton", MacroDetectLMouse, "On")
+    try Hotkey("~*MButton", MacroDetectMMouse, "On")
     ih := InputHook("L1 T10")
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}{F1}{F4}", "-E")
     ih.Start()
-    ih.Wait()
-    if (ih.EndReason = "EndKey")
+    deadline := A_TickCount + 10000
+    while (ih.InProgress && macroDetectedMouse = "" && A_TickCount < deadline)
+        Sleep(50)
+    ih.Stop()
+    try Hotkey("~*RButton", "Off")
+    try Hotkey("~*LButton", "Off")
+    try Hotkey("~*MButton", "Off")
+    if (macroDetectedMouse != "")
+        macroHkEdit.Value := StrLower(macroDetectedMouse)
+    else if (ih.EndReason = "EndKey")
         macroHkEdit.Value := StrLower(ih.EndKey)
     else
         macroHkEdit.Value := ""
@@ -4669,14 +4666,27 @@ MacroDetectMMouse(*) {
 }
 
 MacroDetectRepeatBind(*) {
-    global mrBindEdit
-    mrBindEdit.Value := "..."
+    global mrBindEdit, macroDetectedMouse
+    mrBindEdit.Value := "press any key or click..."
+    global macroDetectedMouse := ""
+    Sleep(300)
+    try Hotkey("~*RButton", MacroDetectRMouse, "On")
+    try Hotkey("~*LButton", MacroDetectLMouse, "On")
+    try Hotkey("~*MButton", MacroDetectMMouse, "On")
     ih := InputHook("L1 T10")
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}{F1}{F4}", "-E")
     ih.Start()
-    ih.Wait()
-    if (ih.EndReason = "EndKey")
+    deadline := A_TickCount + 10000
+    while (ih.InProgress && macroDetectedMouse = "" && A_TickCount < deadline)
+        Sleep(50)
+    ih.Stop()
+    try Hotkey("~*RButton", "Off")
+    try Hotkey("~*LButton", "Off")
+    try Hotkey("~*MButton", "Off")
+    if (macroDetectedMouse != "")
+        mrBindEdit.Value := StrLower(macroDetectedMouse)
+    else if (ih.EndReason = "EndKey")
         mrBindEdit.Value := StrLower(ih.EndKey)
     else
         mrBindEdit.Value := ""
@@ -4753,12 +4763,16 @@ MacroPlayByIndex(idx) {
     global macroSelectedIdx := idx
     global macroPlaying := true
     global macroActiveIdx := idx
+    m := macroList[idx]
+    bgClick := (m.type = "repeat" && m.repeatKeys.Length = 1
+                && m.repeatKeys[1] = "lbutton")
     MainGui.Hide()
     global guiVisible := false
-    if WinExist(arkwindow)
-        WinActivate(arkwindow)
-    Sleep(200)
-    m := macroList[idx]
+    if (!bgClick) {
+        if WinExist(arkwindow)
+            WinActivate(arkwindow)
+        Sleep(200)
+    }
     if (m.type = "recorded")
         SetTimer(MacroPlayRecordedThread.Bind(m), -1)
     else if (m.type = "repeat")
@@ -4840,6 +4854,7 @@ MacroPlayRecordedThread(m) {
 
 MacroPlayRepeatThread(m) {
     global macroPlaying, macroActiveIdx, macroRepeatKeyIdx, arkwindow
+    global MainGui, guiVisible
     myIdx := macroActiveIdx
     global macroRepeatKeyIdx := 1
     keys := m.repeatKeys
@@ -4850,6 +4865,62 @@ MacroPlayRepeatThread(m) {
         return
     }
     curKey := keys[macroRepeatKeyIdx]
+    bgMode := (keys.Length = 1 && keys[1] = "lbutton")
+
+    ; ── BG left-click mode ──────────────────────────────────
+    if (bgMode) {
+        bgInterval := m.repeatInterval
+        MacroBgClickTooltip(m, bgInterval, m.repeatSpam)
+        try Hotkey("$[", MacroBgClickSlower, "On")
+        try Hotkey("$]", MacroBgClickFaster, "On")
+        global _macroBgInterval := bgInterval
+
+        if (m.repeatSpam) {
+            while (macroPlaying) {
+                if WinExist(arkwindow) {
+                    SetControlDelay(-1)
+                    ControlClick("x1 y1", arkwindow,,,,"Pos")
+                }
+                Sleep(16)
+            }
+        } else {
+            while (macroPlaying) {
+                bgInterval := _macroBgInterval
+                remaining := bgInterval
+                while (remaining > 0 && macroPlaying) {
+                    secs := Format("{:.1f}", remaining / 1000)
+                    ToolTip(" BG Left Click: " m.name " in " secs "s`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+                    step := Min(remaining, 100)
+                    Sleep(step)
+                    remaining -= step
+                }
+                if (!macroPlaying)
+                    break
+                if WinExist(arkwindow) {
+                    SetControlDelay(-1)
+                    ControlClick("x1 y1", arkwindow,,,,"Pos")
+                }
+                ToolTip(" BG Left Click: " m.name " CLICKED`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+                Sleep(50)
+            }
+        }
+
+        try Hotkey("$[", "Off")
+        try Hotkey("$]", "Off")
+        if (macroActiveIdx = myIdx) {
+            global macroPlaying := false
+            global macroActiveIdx := 0
+            MacroSaveIfDirty()
+        }
+        ToolTip()
+        if (!guiVisible) {
+            MainGui.Show("NoActivate")
+            global guiVisible := true
+        }
+        return
+    }
+
+    ; ── Normal (foreground) repeat mode ─────────────────────
     if (m.repeatSpam) {
         MacroRepeatBuildTooltip(m, curKey)
         spamTick := 0
@@ -4923,6 +4994,21 @@ MacroRepeatBuildTooltip(m, curKey) {
         keyList .= "`n" arrow k
     }
     ToolTip(" Spam: " curKey keyList qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
+}
+
+MacroBgClickTooltip(m, intervalMs, isSpam) {
+    mode := isSpam ? "Spam" : "Interval: " intervalMs "ms"
+    ToolTip(" BG Left Click: " m.name "  (" mode ")`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+}
+
+MacroBgClickSlower(thisHotkey) {
+    global _macroBgInterval, autoclickIntervalStep
+    global _macroBgInterval := _macroBgInterval + autoclickIntervalStep
+}
+
+MacroBgClickFaster(thisHotkey) {
+    global _macroBgInterval, autoclickIntervalStep, autoclickMinInterval
+    global _macroBgInterval := Max(autoclickMinInterval, _macroBgInterval - autoclickIntervalStep)
 }
 
 MacroPlayPyroThread(m) {
@@ -5371,14 +5457,27 @@ MacroEditMoveToggle(*) {
 }
 
 MacroEditDetectBind(*) {
-    global meBindEdit
-    meBindEdit.Value := "..."
+    global meBindEdit, macroDetectedMouse
+    meBindEdit.Value := "press any key or click..."
+    global macroDetectedMouse := ""
+    Sleep(300)
+    try Hotkey("~*RButton", MacroDetectRMouse, "On")
+    try Hotkey("~*LButton", MacroDetectLMouse, "On")
+    try Hotkey("~*MButton", MacroDetectMMouse, "On")
     ih := InputHook("L1 T10")
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}{F1}{F4}", "-E")
     ih.Start()
-    ih.Wait()
-    if (ih.EndReason = "EndKey")
+    deadline := A_TickCount + 10000
+    while (ih.InProgress && macroDetectedMouse = "" && A_TickCount < deadline)
+        Sleep(50)
+    ih.Stop()
+    try Hotkey("~*RButton", "Off")
+    try Hotkey("~*LButton", "Off")
+    try Hotkey("~*MButton", "Off")
+    if (macroDetectedMouse != "")
+        meBindEdit.Value := StrLower(macroDetectedMouse)
+    else if (ih.EndReason = "EndKey")
         meBindEdit.Value := StrLower(ih.EndKey)
     else
         meBindEdit.Value := ""
@@ -5800,7 +5899,7 @@ MacroDialogOpen() {
 }
 
 MacroHotkeyHandler(idx, thisHotkey) {
-    global macroPlaying, macroTabActive, macroSelectedIdx, macroArmed, arkwindow
+    global macroPlaying, macroTabActive, macroSelectedIdx, macroArmed, macroActiveIdx, arkwindow
     global MainGui, guiVisible, macroList, macroHotkeysLive
     sel := macroList[idx]
 
@@ -5821,8 +5920,17 @@ MacroHotkeyHandler(idx, thisHotkey) {
     }
     if (idx != macroSelectedIdx)
         return
-    if (macroPlaying)
+    if (macroPlaying) {
+        if ((sel.type = "repeat" || sel.type = "recorded") && idx = macroActiveIdx) {
+            MacroStopPlay()
+            global macroArmed := true
+            MacroRegisterHotkeys(true)
+            keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
+            ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
+            SetTimer(() => ToolTip(), -3000)
+        }
         return
+    }
     if (MacroIsBusy()) {
         ToolTip(" Macro paused — another function is running`n Will resume when done", 0, 0)
         SetTimer(() => ToolTip(), -2000)
@@ -10392,7 +10500,7 @@ OBUploadCharacterThread() {
     joinAttempts := 0
     while (obUploadRunning && joinAttempts < 30) {
         joinAttempts++
-        ToolTip()  ; hide tooltip before OCR scan
+        ToolTip()  
         DllCall("SetCursorPos", "int", obcJoinX, "int", obcJoinY)
         Sleep(50)
         Click()
@@ -11345,7 +11453,6 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
             reCheck := OBItemPresent(detectFilter)
             obLog.Push("[T#" uploadCount+1 "] no overlay — re-check=" (reCheck?"FOUND":"EMPTY") " +" (A_TickCount - runStartTick) "ms")
             if (reCheck) {
-                ; Items still there — T missed or lagged. Wait for overlay clear then retry.
                 retryWait := 0
                 while (!OBOverlayClear() && retryWait < 60) {
                     Sleep(50)
@@ -12428,7 +12535,6 @@ OBBarCountItems() {
             g := (col >> 8) & 0xFF
             b := col & 0xFF
             r := (col >> 16) & 0xFF
-            ; Cyan: low red, high green, high blue (matches 0x019C88 pattern)
             if (r < 30 && g > 100 && b > 80) {
                 return slot
             }
@@ -15520,7 +15626,6 @@ PcHotkeyBracketRight(thisHotkey) {
         if (depoCycle.Length > 1) {
             global depoCycleIdx := Mod(depoCycleIdx, depoCycle.Length) + 1
             ToolTip(DepoBuildTooltip(), 0, 0, 1)
-            SoundBeep(600, 80)
         }
         return
     }
@@ -16129,7 +16234,6 @@ ImprintToggleArmed(*) {
     MainGui.Hide()
     global guiVisible := false
     ToolTip("IMPRINT ARMED — R read | Q auto-scan`nF1 = stop", 10, 10)
-    SoundBeep(800, 100)
 }
 
 ImprintStopAll() {
@@ -16156,13 +16260,10 @@ ImprintToggleAutoMode() {
     if (imprintAutoMode) {
         imprintAutoMode := false
         ToolTip("Auto-scan OFF`nARMED — R read | Q auto-scan", 10, 10)
-        SoundBeep(400, 100)
         return
     }
     imprintAutoMode := true
     ToolTip("Auto-scan ON — scanning...", 10, 10)
-    SoundBeep(800, 100)
-    SoundBeep(800, 100)
     ImprintAutoScanLoop()
 }
 
@@ -16225,7 +16326,6 @@ ImprintOnReadAndProcess() {
     } catch as ocrErr {
         ImLog("OCR FAILED: " ocrErr.Message)
         ToolTip("OCR failed — try again`nARMED — R read | Q auto-scan", 10, 10)
-        SoundBeep(300, 100)
         return
     }
 
@@ -16241,7 +16341,6 @@ ImprintOnReadAndProcess() {
     if (matched = "") {
         ImLog("No match in: [" ocrText "]")
         ToolTip("No food found: [" ocrText "]`nARMED — R read | Q auto-scan", 10, 10)
-        SoundBeep(300, 100)
         return
     }
 
