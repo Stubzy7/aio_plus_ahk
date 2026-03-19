@@ -6,6 +6,9 @@ Macro hotkey mouse detection + repeat toggle-off
 - Detect Key popups capture mouse buttons now.
 - Repeat/recorded macros toggle off by pressing the hotkey again.
 
+Added Auto Level saddle-only mode
+- Auto Saddle works with zero stat points.
+
 Removed all SoundBeep calls
 
 ---
