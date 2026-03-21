@@ -2,6 +2,19 @@
 
 ---
 
+Popcorn OCR + macro tab improvements
+- OCR detects tame vs storage inventories, uses weight for tames
+- Tame popcorn stops at saddle weight via weight OCR
+- Crafting inventory OCR strips weight data from slot count
+- Popcorn count=0 drops everything w OCR instead of keybinds
+- Guided macros save as grid params instead of per-slot events in config
+- Guided replay drop timing fixed (was too fast)
+- Repeat popcorn F key arms/disarms properly w F1
+- F1 show UI fully disarms all macro hotkeys
+- Popcorn F no longer triggers before macro is armed
+
+---
+
 Macro hotkey mouse detection + repeat toggle-off
 - Detect Key popups capture mouse buttons now.
 - Repeat/recorded macros toggle off by pressing the hotkey again.

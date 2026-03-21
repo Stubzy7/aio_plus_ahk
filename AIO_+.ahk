@@ -37,10 +37,14 @@ global magicFPresetIdx      := 1
 global mfSearchBarClickMs  := 30
 global mfFilterSettleMs    := 100
 global mfTransferSettleMs  := 100
-if (!FileExist(A_ScriptDir "\AIO_config.ini") || IniRead(A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs", "") = "") {
-    IniWrite(30, A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs")
-    IniWrite(100, A_ScriptDir "\AIO_config.ini", "Timings", "FilterSettleMs")
-    IniWrite(100, A_ScriptDir "\AIO_config.ini", "Timings", "TransferSettleMs")
+if (!FileExist(A_ScriptDir "\AIO_config.ini")) {
+    if (FileExist(A_ScriptDir "\AIO_config.default.ini"))
+        FileCopy(A_ScriptDir "\AIO_config.default.ini", A_ScriptDir "\AIO_config.ini")
+    else {
+        IniWrite(30, A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs")
+        IniWrite(100, A_ScriptDir "\AIO_config.ini", "Timings", "FilterSettleMs")
+        IniWrite(100, A_ScriptDir "\AIO_config.ini", "Timings", "TransferSettleMs")
+    }
 }
 try mfSearchBarClickMs := Integer(IniRead(A_ScriptDir "\AIO_config.ini", "Timings", "SearchBarClickMs", "30"))
 try mfFilterSettleMs   := Integer(IniRead(A_ScriptDir "\AIO_config.ini", "Timings", "FilterSettleMs", "100"))
@@ -457,6 +461,35 @@ global pcTransferAllY      := Round(273  * heightmultiplier)
 global pcInvDetectX        := Round(1447 * widthmultiplier)
 global pcInvDetectY        := Round(226  * heightmultiplier)
 
+global pcPlayerInvDetectX  := Round(1035 * widthmultiplier)
+global pcPlayerInvDetectY  := Round(1033 * heightmultiplier)
+global pcPlayerInvDetectColor := 0xBCF4FF
+global pcPlayerInvDetectTol := 15
+
+global pcTameDetectX       := Round(1224 * widthmultiplier)
+global pcTameDetectY       := Round(299  * heightmultiplier)
+global pcTameDetectColor   := 0xFFFECD
+global pcTameDetectTol     := 15
+global pcIsTame            := false
+
+global pcOxyDetectX        := Round(1145 * widthmultiplier)
+global pcOxyDetectY        := Round(756  * heightmultiplier)
+global pcOxyDetectColor    := 0xBAF2FD
+global pcOxyDetectTol      := 15
+
+global pcWeightNX := Round(1213 * widthmultiplier)
+global pcWeightNY := Round(783  * heightmultiplier)
+global pcWeightNW := Round(260  * widthmultiplier)
+global pcWeightNH := Round(40   * heightmultiplier)
+global pcWeightOX := Round(1180 * widthmultiplier)
+global pcWeightOY := Round(823  * heightmultiplier)
+global pcWeightOW := Round(293  * widthmultiplier)
+global pcWeightOH := Round(47   * heightmultiplier)
+global pcWeightOcrX := pcWeightNX
+global pcWeightOcrY := pcWeightNY
+global pcWeightOcrW := pcWeightNW
+global pcWeightOcrH := pcWeightNH
+
 global pcSpeedTxt, pcStatusTxt
 global pcCustomCard
 global pcForgeSkipInd, pcForgeXferInd
@@ -548,6 +581,8 @@ global macroRepeatKeyIdx     := 1
 global _macroBgInterval      := 1000
 global macroSelectedIdx      := 1
 global macroArmed            := false
+global macroPopcornArmed     := false
+global macroPopcornMacro     := ""
 global macroSpeedDirty       := false
 global macroHotkeysLive      := false
 
@@ -2927,7 +2962,6 @@ RunAutoLvl(*) {
             slotLabel .= (i > 1 ? " + " : "") n
         autoLvlCycleSlots.Push({label: slotLabel, stats: activeStats})
     } else {
-        ; Individual slots — one per stat
         for s in activeStats {
             autoLvlCycleSlots.Push({label: s.name " +" s.edit.Value, stats: [s]})
         }
@@ -2987,7 +3021,6 @@ autoLvLFpressed() {
     
     slot := autoLvlCycleSlots[autoLvlCycleIdx]
     
-    ; Wait for inventory to open
     waitOpenInvCount := 0
     autolvlOpenInv   := true
     _nfB2 := 0
@@ -3900,7 +3933,15 @@ MacroLoadAll() {
                         m.repeatKeys.Push(Trim(part))
                 m.repeatInterval := Integer(IniRead(configFile, sec, "RepeatInterval", "1000"))
                 m.repeatSpam := Integer(IniRead(configFile, sec, "RepeatSpam", "0"))
-                m.repeatMovement := Integer(IniRead(configFile, sec, "RepeatMovement", "1"))
+                pcRaw := IniRead(configFile, sec, "PopcornFilters", "")
+                m.popcornFilters := []
+                if (pcRaw != "") {
+                    for , part in StrSplit(pcRaw, "|")
+                        m.popcornFilters.Push(Trim(part) = "<all>" ? "" : Trim(part))
+                }
+                m.popcornStyle := IniRead(configFile, sec, "PopcornStyle", "all")
+                m.popcornDropCount := Integer(IniRead(configFile, sec, "PopcornDropCount", "0"))
+
             } else if (m.type = "pyro") {
                 m.speedMult := Float(IniRead(configFile, sec, "SpeedMult", "1.0"))
             } else if (m.type = "guided") {
@@ -3913,6 +3954,7 @@ MacroLoadAll() {
                 m.turbo := Integer(IniRead(configFile, sec, "Turbo", "0"))
                 m.turboDelay := Integer(IniRead(configFile, sec, "TurboDelay", "30"))
                 m.playerSearch := Integer(IniRead(configFile, sec, "PlayerSearch", "0"))
+                m.popcornAll := Integer(IniRead(configFile, sec, "PopcornAll", "0"))
                 filterRaw := IniRead(configFile, sec, "SearchFilters", "")
                 m.searchFilters := []
                 if (filterRaw != "") {
@@ -3920,31 +3962,42 @@ MacroLoadAll() {
                         if (Trim(part) != "")
                             m.searchFilters.Push(Trim(part))
                 }
-                evtCount := Integer(IniRead(configFile, sec, "EventCount", "0"))
-                m.events := []
-                loop evtCount {
-                    raw := IniRead(configFile, sec, "E" A_Index, "")
-                    if (raw = "")
-                        continue
-                    parts := StrSplit(raw, "|")
-                    evt := {}
-                    evt.type := parts[1]
-                    if (evt.type = "K") {
-                        evt.dir := parts[2]
-                        evt.key := parts[3]
-                        evt.delay := Integer(parts[4])
-                    } else if (evt.type = "M") {
-                        evt.x := Integer(parts[2])
-                        evt.y := Integer(parts[3])
-                        evt.delay := Integer(parts[4])
-                    } else if (evt.type = "C") {
-                        evt.dir := parts[2]
-                        evt.btn := parts[3]
-                        evt.x := Integer(parts[4])
-                        evt.y := Integer(parts[5])
-                        evt.delay := Integer(parts[6])
+                gAction := IniRead(configFile, sec, "GuidedAction", "")
+                if (gAction != "") {
+                    m.guidedAction := gAction
+                    m.guidedKey := IniRead(configFile, sec, "GuidedKey", "g")
+                    m.guidedCount := Integer(IniRead(configFile, sec, "GuidedCount", "0"))
+                    m.events := RebuildGuidedEvents(gAction, m.guidedCount, m.guidedKey)
+                } else {
+                    m.guidedAction := ""
+                    m.guidedKey := ""
+                    m.guidedCount := 0
+                    evtCount := Integer(IniRead(configFile, sec, "EventCount", "0"))
+                    m.events := []
+                    loop evtCount {
+                        raw := IniRead(configFile, sec, "E" A_Index, "")
+                        if (raw = "")
+                            continue
+                        parts := StrSplit(raw, "|")
+                        evt := {}
+                        evt.type := parts[1]
+                        if (evt.type = "K") {
+                            evt.dir := parts[2]
+                            evt.key := parts[3]
+                            evt.delay := Integer(parts[4])
+                        } else if (evt.type = "M") {
+                            evt.x := Integer(parts[2])
+                            evt.y := Integer(parts[3])
+                            evt.delay := Integer(parts[4])
+                        } else if (evt.type = "C") {
+                            evt.dir := parts[2]
+                            evt.btn := parts[3]
+                            evt.x := Integer(parts[4])
+                            evt.y := Integer(parts[5])
+                            evt.delay := Integer(parts[6])
+                        }
+                        m.events.Push(evt)
                     }
-                    m.events.Push(evt)
                 }
             } else if (m.type = "combo") {
                 pcRaw := IniRead(configFile, sec, "PopcornFilters", "")
@@ -4006,9 +4059,8 @@ MacroEnsureDefaults() {
         m.type := "repeat"
         m.hotkey := "x"
         m.repeatKeys := ["RButton", "c"]
-        m.repeatInterval := 2000
+        m.repeatInterval := 0
         m.repeatSpam := 1
-        m.repeatMovement := 0
         macroList.Push(m)
         changed := true
     }
@@ -4097,7 +4149,20 @@ MacroSaveAll() {
             IniWrite(keysStr, configFile, sec, "RepeatKeys")
             IniWrite(m.repeatInterval, configFile, sec, "RepeatInterval")
             IniWrite(m.repeatSpam ? 1 : 0, configFile, sec, "RepeatSpam")
-            IniWrite(m.repeatMovement ? 1 : 0, configFile, sec, "RepeatMovement")
+            if (m.HasProp("popcornFilters") && m.popcornFilters.Length > 0) {
+                pcParts := []
+                for , pf in m.popcornFilters
+                    pcParts.Push(pf = "" ? "<all>" : pf)
+                pcStr := ""
+                for i, p in pcParts
+                    pcStr .= (i > 1 ? "|" : "") p
+                IniWrite(pcStr, configFile, sec, "PopcornFilters")
+            }
+            if (m.HasProp("popcornStyle"))
+                IniWrite(m.popcornStyle, configFile, sec, "PopcornStyle")
+            if (m.HasProp("popcornDropCount"))
+                IniWrite(m.popcornDropCount, configFile, sec, "PopcornDropCount")
+
         } else if (m.type = "pyro") {
             IniWrite(Format("{:.3f}", m.speedMult), configFile, sec, "SpeedMult")
         } else if (m.type = "guided") {
@@ -4110,20 +4175,27 @@ MacroSaveAll() {
             IniWrite(m.HasProp("turbo") ? m.turbo : 0, configFile, sec, "Turbo")
             IniWrite(m.HasProp("turboDelay") ? m.turboDelay : 30, configFile, sec, "TurboDelay")
             IniWrite(m.HasProp("playerSearch") ? m.playerSearch : 0, configFile, sec, "PlayerSearch")
+            IniWrite(m.HasProp("popcornAll") ? m.popcornAll : 0, configFile, sec, "PopcornAll")
             filterStr := ""
             if (m.HasProp("searchFilters")) {
                 for fi, fv in m.searchFilters
                     filterStr .= (fi > 1 ? "|" : "") fv
             }
             IniWrite(filterStr, configFile, sec, "SearchFilters")
-            IniWrite(m.events.Length, configFile, sec, "EventCount")
-            for j, evt in m.events {
-                if (evt.type = "K")
-                    IniWrite(evt.type "|" evt.dir "|" evt.key "|" evt.delay, configFile, sec, "E" j)
-                else if (evt.type = "M")
-                    IniWrite(evt.type "|" evt.x "|" evt.y "|" evt.delay, configFile, sec, "E" j)
-                else if (evt.type = "C")
-                    IniWrite(evt.type "|" evt.dir "|" evt.btn "|" evt.x "|" evt.y "|" evt.delay, configFile, sec, "E" j)
+            if (m.HasProp("guidedAction") && m.guidedAction != "") {
+                IniWrite(m.guidedAction, configFile, sec, "GuidedAction")
+                IniWrite(m.guidedKey, configFile, sec, "GuidedKey")
+                IniWrite(m.guidedCount, configFile, sec, "GuidedCount")
+            } else {
+                IniWrite(m.events.Length, configFile, sec, "EventCount")
+                for j, evt in m.events {
+                    if (evt.type = "K")
+                        IniWrite(evt.type "|" evt.dir "|" evt.key "|" evt.delay, configFile, sec, "E" j)
+                    else if (evt.type = "M")
+                        IniWrite(evt.type "|" evt.x "|" evt.y "|" evt.delay, configFile, sec, "E" j)
+                    else if (evt.type = "C")
+                        IniWrite(evt.type "|" evt.dir "|" evt.btn "|" evt.x "|" evt.y "|" evt.delay, configFile, sec, "E" j)
+                }
             }
         } else if (m.type = "combo") {
             pcStr := ""
@@ -4185,16 +4257,16 @@ MacroUpdateListView() {
             mfCount := m.HasProp("magicFFilters") ? m.magicFFilters.Length : 0
             speedStr := "P:" pCount " M:" mfCount
         } else if (m.type = "repeat") {
-            if (m.HasProp("repeatSpam") && m.repeatSpam)
-                speedStr := "Spam"
+            if ((m.HasProp("repeatSpam") && m.repeatSpam) || (m.HasProp("repeatInterval") && m.repeatInterval = 0))
+                speedStr := "Hold"
             else if (m.HasProp("repeatInterval"))
                 speedStr := Format("{:.1f}s", m.repeatInterval / 1000)
             else
                 speedStr := "?"
-            if (m.HasProp("repeatMovement") && m.repeatMovement)
-                speedStr .= " +Move"
             if (m.HasProp("repeatKeys") && m.repeatKeys.Length > 1)
                 speedStr .= " (" m.repeatKeys.Length "keys)"
+            if (m.HasProp("popcornFilters") && m.popcornFilters.Length > 0)
+                speedStr .= " +PC"
         } else {
             speedStr := ""
         }
@@ -4428,22 +4500,19 @@ MacroShowSaveDialog() {
     macroSaveGui.Add("Text", "x15 y72 w55 h24 +0x200", "Hotkey:")
     global macroHkEdit := macroSaveGui.Add("Edit", "x75 y72 w100 h24 ReadOnly", "")
     macroHkEdit.SetFont("s9 c000000", "Segoe UI")
-    macroHkDetect := macroSaveGui.Add("Button", "x180 y72 w60 h24", "Detect")
-    macroHkDetect.SetFont("s8 cDDDDDD", "Segoe UI")
+    macroHkDetect := DarkBtn(macroSaveGui, "x180 y72 w60 h24", "Detect", _RED_BGR, _DK_BG, -11, true)
     macroHkDetect.OnEvent("Click", MacroDetectSaveHotkey)
     global macroLoopChk := macroSaveGui.Add("CheckBox", "x15 y102 w80 h24", "Loop")
     macroLoopChk.SetFont("s9 cDDDDDD", "Segoe UI")
     evtCount := macroRecordEvents.Length
     macroSaveGui.SetFont("s8 c888888", "Segoe UI")
     macroSaveGui.Add("Text", "x100 y104 w140 h20", evtCount " events recorded")
-    macroSaveBtn := macroSaveGui.Add("Button", "x15 y132 w100 h26", "Save")
-    macroSaveBtn.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroSaveBtn := DarkBtn(macroSaveGui, "x15 y132 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     macroSaveBtn.OnEvent("Click", MacroDoSaveRecorded)
-    macroDiscardBtn := macroSaveGui.Add("Button", "x120 y132 w100 h26", "Discard")
-    macroDiscardBtn.SetFont("s9 cDDDDDD", "Segoe UI")
+    macroDiscardBtn := DarkBtn(macroSaveGui, "x120 y132 w100 h26", "Discard", 0xDDDDDD, _DK_BG, -12, false)
     macroDiscardBtn.OnEvent("Click", MacroDiscardRecording)
     macroSaveGui.OnEvent("Close", MacroDiscardRecording)
-    macroSaveGui.Show("AutoSize")
+    macroSaveGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 MacroDiscardRecording(*) {
@@ -4457,6 +4526,7 @@ MacroDetectSaveHotkey(*) {
     global macroHkEdit, macroDetectedMouse
     macroHkEdit.Value := "press any key or click..."
     global macroDetectedMouse := ""
+    MacroDetectStart()
     Sleep(300)
     try Hotkey("~*RButton", MacroDetectRMouse, "On")
     try Hotkey("~*LButton", MacroDetectLMouse, "On")
@@ -4472,6 +4542,7 @@ MacroDetectSaveHotkey(*) {
     try Hotkey("~*RButton", "Off")
     try Hotkey("~*LButton", "Off")
     try Hotkey("~*MButton", "Off")
+    MacroDetectEnd()
     if (macroDetectedMouse != "")
         macroHkEdit.Value := StrLower(macroDetectedMouse)
     else if (ih.EndReason = "EndKey")
@@ -4521,66 +4592,92 @@ MacroShowRepeatDialog(*) {
         if (macroRepeatGui != "")
             macroRepeatGui.Destroy()
     }
-    macroRepeatGui := Gui("+AlwaysOnTop", "New Key Repeat")
+    macroRepeatGui := Gui("+AlwaysOnTop", "Key Repeat")
     macroRepeatGui.BackColor := "1A1A1A"
+    px := 16
+    y := 16
     macroRepeatGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-    macroRepeatGui.Add("Text", "x15 y15 w190", "New Key Repeat")
-    mrHelpBtn := macroRepeatGui.Add("Button", "x215 y12 w24 h24", "?")
-    mrHelpBtn.SetFont("s8 Bold cFF4444", "Segoe UI")
+    macroRepeatGui.Add("Text", "x" px " y" y " w250", "Key Repeat")
+    mrHelpBtn := DarkBtn(macroRepeatGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
     mrHelpBtn.OnEvent("Click", MacroRepeatShowHelp)
+    y += 30
     macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    macroRepeatGui.Add("Text", "x15 y42 w55 h24 +0x200", "Name:")
-    global mrNameEdit := macroRepeatGui.Add("Edit", "x75 y42 w165 h24", "")
+    macroRepeatGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Name:")
+    global mrNameEdit := macroRepeatGui.Add("Edit", "x130 y" y " w190 h24", "")
     mrNameEdit.SetFont("s9 c000000", "Segoe UI")
-    macroRepeatGui.Add("Text", "x15 y72 w55 h24 +0x200", "Keys:")
-    global mrKeyEdit := macroRepeatGui.Add("Edit", "x75 y72 w100 h24 ReadOnly", "")
+    y += 30
+    macroRepeatGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Keys:")
+    global mrKeyEdit := macroRepeatGui.Add("Edit", "x130 y" y " w120 h24 ReadOnly", "")
     mrKeyEdit.SetFont("s9 c000000", "Segoe UI")
-    mrKeyAdd := macroRepeatGui.Add("Button", "x180 y72 w35 h24", "Add")
-    mrKeyAdd.SetFont("s8 cDDDDDD", "Segoe UI")
+    mrKeyAdd := DarkBtn(macroRepeatGui, "x260 y" y " w35 h24", "Add", _RED_BGR, _DK_BG, -11, true)
     mrKeyAdd.OnEvent("Click", MacroDetectRepeatKey)
-    mrKeyClear := macroRepeatGui.Add("Button", "x218 y72 w22 h24", "X")
-    mrKeyClear.SetFont("s8 cDDDDDD", "Segoe UI")
+    mrKeyClear := DarkBtn(macroRepeatGui, "x298 y" y " w22 h24", "X", _RED_BGR, _DK_BG, -11, true)
     mrKeyClear.OnEvent("Click", MacroClearRepeatKeys)
     global mrKeyList := []
+    y += 24
     macroRepeatGui.SetFont("s8 c888888 Italic", "Segoe UI")
-    macroRepeatGui.Add("Text", "x75 y97 w165 h14", "Q cycles between keys during play")
+    macroRepeatGui.Add("Text", "x130 y" y " w190 h14", "Q cycles between keys during play")
+    y += 22
     macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    macroRepeatGui.Add("Text", "x15 y114 w55 h24 +0x200", "Every:")
-    global mrIntervalEdit := macroRepeatGui.Add("Edit", "x75 y114 w65 h24 +Number", "2000")
+    macroRepeatGui.Add("Text", "x" px " y" y " w110 h24 +0x200", "Interval (ms):")
+    global mrIntervalEdit := macroRepeatGui.Add("Edit", "x130 y" y " w65 h24 +Number", "600")
     mrIntervalEdit.SetFont("s9 c000000", "Segoe UI")
-    macroRepeatGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroRepeatGui.Add("Text", "x145 y114 w30 h24 +0x200", "ms")
+    macroRepeatGui.SetFont("s8 c888888", "Segoe UI")
+    macroRepeatGui.Add("Text", "x200 y" (y + 2) " w80 h20", "(0 = hold)")
+    y += 30
     macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    global mrSpamChk := macroRepeatGui.Add("CheckBox", "x15 y142 w70 h24", "Spam")
-    global mrMoveChk := macroRepeatGui.Add("CheckBox", "x90 y142 w145 h24 Checked", "Move between")
-    mrSpamChk.OnEvent("Click", MacroRepeatSpamToggle)
-    mrMoveChk.OnEvent("Click", MacroRepeatMoveToggle)
-    macroRepeatGui.Add("Text", "x15 y170 w55 h24 +0x200", "Bind:")
-    global mrBindEdit := macroRepeatGui.Add("Edit", "x75 y170 w100 h24 ReadOnly", "")
+    macroRepeatGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Bind:")
+    global mrBindEdit := macroRepeatGui.Add("Edit", "x130 y" y " w80 h24 ReadOnly", "")
     mrBindEdit.SetFont("s9 c000000", "Segoe UI")
-    mrBindDetect := macroRepeatGui.Add("Button", "x180 y170 w60 h24", "Detect")
-    mrBindDetect.SetFont("s8 cDDDDDD", "Segoe UI")
+    mrBindDetect := DarkBtn(macroRepeatGui, "x215 y" y " w60 h24", "Detect", _RED_BGR, _DK_BG, -11, true)
     mrBindDetect.OnEvent("Click", MacroDetectRepeatBind)
-    mrSaveBtn := macroRepeatGui.Add("Button", "x15 y202 w100 h26", "Save")
-    mrSaveBtn.SetFont("s9 Bold cFF4444", "Segoe UI")
+    y += 34
+    macroRepeatGui.Add("Progress", "x" px " y" y " w318 h1 Background333333")
+    y += 8
+    global mrPcVar := 0
+    global mrPcCheck := macroRepeatGui.Add("CheckBox", "x" px " y" y " w200 h24", "Popcorn after repeat")
+    mrPcCheck.OnEvent("Click", MacroRepeatTogglePc)
+    y += 26
+    global mrPcFrameY := y
+    macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global mrPcDropLbl := macroRepeatGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop count:")
+    macroRepeatGui.SetFont("s9 c000000", "Segoe UI")
+    global mrPcDropEdit := macroRepeatGui.Add("Edit", "x" (130 + 16) " y" y " w60 h24 +Number", "0")
+    macroRepeatGui.SetFont("s8 c888888", "Segoe UI")
+    global mrPcDropHint := macroRepeatGui.Add("Text", "x" (195 + 16) " y" (y + 2) " w80 h20", "(0 = all)")
+    y += 28
+    macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global mrPcKeyLbl := macroRepeatGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop key:")
+    macroRepeatGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    global mrPcKeyVal := macroRepeatGui.Add("Text", "x" (130 + 16) " y" y " w60 h24 +0x200", StrUpper(pcDropKey != "" ? pcDropKey : "?"))
+    global mrSaveBtn := DarkBtn(macroRepeatGui, "x" px " y300 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     mrSaveBtn.OnEvent("Click", MacroDoSaveRepeat)
-    mrCancelBtn := macroRepeatGui.Add("Button", "x120 y202 w100 h26", "Cancel")
-    mrCancelBtn.SetFont("s9 cDDDDDD", "Segoe UI")
+    global mrCancelBtn := DarkBtn(macroRepeatGui, "x200 y300 w100 h26", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     mrCancelBtn.OnEvent("Click", MacroRepeatCancel)
     macroRepeatGui.OnEvent("Close", MacroRepeatCancel)
-    macroRepeatGui.Show("AutoSize")
+    MacroRepeatTogglePc()
+    macroRepeatGui.Show("w350 h340 " MacroPopupPos(350))
 }
 
-MacroRepeatSpamToggle(*) {
-    global mrSpamChk, mrMoveChk
-    if (mrSpamChk.Value)
-        mrMoveChk.Value := 0
-}
 
-MacroRepeatMoveToggle(*) {
-    global mrSpamChk, mrMoveChk
-    if (mrMoveChk.Value)
-        mrSpamChk.Value := 0
+
+MacroRepeatTogglePc(*) {
+    global mrPcCheck, mrPcDropLbl, mrPcDropEdit, mrPcDropHint, mrPcKeyLbl, mrPcKeyVal
+    global mrSaveBtn, mrCancelBtn, mrPcFrameY, macroRepeatGui
+    show := mrPcCheck.Value
+    mrPcDropLbl.Visible := show
+    mrPcDropEdit.Visible := show
+    mrPcDropHint.Visible := show
+    mrPcKeyLbl.Visible := show
+    mrPcKeyVal.Visible := show
+    if (show) {
+        btnY := mrPcFrameY + 66
+    } else {
+        btnY := mrPcFrameY + 4
+    }
+    mrSaveBtn.Move(, btnY)
+    mrCancelBtn.Move(, btnY)
+    macroRepeatGui.Show("w350 h" (btnY + 42) " NoActivate")
 }
 
 MacroClearRepeatKeys(*) {
@@ -4614,13 +4711,14 @@ MacroRepeatShowHelp(*) {
         "Bind = activation key after arming.`n"
         "Q cycles keys. Z = next macro. F1 = stop.")
     helpGui.OnEvent("Close", (*) => (helpGui.Destroy(), helpGui := ""))
-    helpGui.Show("w280 h120")
+    helpGui.Show("w280 h120 " MacroPopupPos(280))
 }
 
 MacroDetectRepeatKey(*) {
     global mrKeyEdit, macroDetectedMouse, mrKeyList
     mrKeyEdit.Value := "press any key or click..."
     global macroDetectedMouse := ""
+    MacroDetectStart()
     Sleep(300)
     try Hotkey("~*RButton", MacroDetectRMouse, "On")
     try Hotkey("~*LButton", MacroDetectLMouse, "On")
@@ -4636,6 +4734,7 @@ MacroDetectRepeatKey(*) {
     try Hotkey("~*RButton", "Off")
     try Hotkey("~*LButton", "Off")
     try Hotkey("~*MButton", "Off")
+    MacroDetectEnd()
     newKey := ""
     if (macroDetectedMouse != "")
         newKey := StrLower(macroDetectedMouse)
@@ -4655,6 +4754,24 @@ MacroDetectRepeatKey(*) {
     }
 }
 
+global macroDetecting := false
+
+MacroDetectStart() {
+    global macroDetecting := true
+    OnMessage(0x007B, MacroBlockContextMenu)
+}
+
+MacroDetectEnd() {
+    global macroDetecting := false
+    OnMessage(0x007B, MacroBlockContextMenu, 0)
+}
+
+MacroBlockContextMenu(wParam, lParam, msg, hwnd) {
+    global macroDetecting
+    if (macroDetecting)
+        return 0
+}
+
 MacroDetectRMouse(*) {
     global macroDetectedMouse := "RButton"
 }
@@ -4669,6 +4786,7 @@ MacroDetectRepeatBind(*) {
     global mrBindEdit, macroDetectedMouse
     mrBindEdit.Value := "press any key or click..."
     global macroDetectedMouse := ""
+    MacroDetectStart()
     Sleep(300)
     try Hotkey("~*RButton", MacroDetectRMouse, "On")
     try Hotkey("~*LButton", MacroDetectLMouse, "On")
@@ -4684,6 +4802,7 @@ MacroDetectRepeatBind(*) {
     try Hotkey("~*RButton", "Off")
     try Hotkey("~*LButton", "Off")
     try Hotkey("~*MButton", "Off")
+    MacroDetectEnd()
     if (macroDetectedMouse != "")
         mrBindEdit.Value := StrLower(macroDetectedMouse)
     else if (ih.EndReason = "EndKey")
@@ -4694,7 +4813,7 @@ MacroDetectRepeatBind(*) {
 
 MacroDoSaveRepeat(*) {
     global macroRepeatGui, macroList, macroTabActive
-    global mrNameEdit, mrKeyList, mrIntervalEdit, mrSpamChk, mrMoveChk, mrBindEdit
+    global mrNameEdit, mrKeyList, mrIntervalEdit, mrBindEdit, mrPcCheck, mrPcDropEdit
     name := Trim(mrNameEdit.Value)
     if (name = "" || mrKeyList.Length = 0) {
         ToolTip("Name and at least one key required!")
@@ -4709,19 +4828,33 @@ MacroDoSaveRepeat(*) {
     m.repeatKeys := []
     for , k in mrKeyList
         m.repeatKeys.Push(k)
-    m.repeatInterval := Integer(mrIntervalEdit.Value > 0 ? mrIntervalEdit.Value : 1000)
-    m.repeatSpam := mrSpamChk.Value
-    m.repeatMovement := mrMoveChk.Value
+    m.repeatInterval := Integer(mrIntervalEdit.Value >= 0 ? mrIntervalEdit.Value : 600)
+    m.repeatSpam := (m.repeatInterval = 0) ? 1 : 0
+    if (mrPcCheck.Value) {
+        dc := Integer(mrPcDropEdit.Value)
+        m.popcornFilters := [""]
+        m.popcornStyle := (dc = 0) ? "all" : "amount"
+        m.popcornDropCount := dc
+    } else {
+        m.popcornFilters := []
+        m.popcornStyle := "all"
+        m.popcornDropCount := 0
+    }
+    try macroRepeatGui.Destroy()
+    global macroRepeatGui := ""
+    MacroRepeatFinalizeSave(m)
+}
+
+MacroRepeatFinalizeSave(m) {
+    global macroList, macroTabActive
     macroList.Push(m)
     MacroSaveAll()
     MacroUpdateListView()
-    try macroRepeatGui.Destroy()
-    global macroRepeatGui := ""
     MacroRegisterHotkeys(macroTabActive)
     keyStr := ""
     for i, k in m.repeatKeys
         keyStr .= (i > 1 ? ", " : "") k
-    ToolTip(" Key Repeat '" name "' saved! [" keyStr "]", 0, 0)
+    ToolTip(" Key Repeat '" m.name "' saved! [" keyStr "]", 0, 0)
     SetTimer(() => ToolTip(), -2000)
 }
 
@@ -4751,7 +4884,10 @@ MacroPlaySelected(*) {
         MacroLog("PlaySelected: launching combo thread immediately")
         MacroPlayByIndex(macroSelectedIdx)
     } else {
-        ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm", 0, 0)
+        pcHint := (sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0) ? "`n F = popcorn" : ""
+        if (pcHint != "")
+            MacroArmPopcornF(macroSelectedIdx)
+        ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) pcHint "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm", 0, 0)
     }
 }
 
@@ -4763,6 +4899,7 @@ MacroPlayByIndex(idx) {
     global macroSelectedIdx := idx
     global macroPlaying := true
     global macroActiveIdx := idx
+    MacroDisarmPopcornF()
     m := macroList[idx]
     bgClick := (m.type = "repeat" && m.repeatKeys.Length = 1
                 && m.repeatKeys[1] = "lbutton")
@@ -4867,12 +5004,13 @@ MacroPlayRepeatThread(m) {
     curKey := keys[macroRepeatKeyIdx]
     bgMode := (keys.Length = 1 && keys[1] = "lbutton")
 
-    ; ── BG left-click mode ──────────────────────────────────
+    ; ── BG left-click ──────────────────────────────────
+    hasPc := m.HasProp("popcornFilters") && m.popcornFilters.Length > 0
     if (bgMode) {
         bgInterval := m.repeatInterval
         MacroBgClickTooltip(m, bgInterval, m.repeatSpam)
-        try Hotkey("$[", MacroBgClickSlower, "On")
-        try Hotkey("$]", MacroBgClickFaster, "On")
+        try Hotkey("$[", MacroBgClickFaster, "On")
+        try Hotkey("$]", MacroBgClickSlower, "On")
         global _macroBgInterval := bgInterval
 
         if (m.repeatSpam) {
@@ -4889,7 +5027,7 @@ MacroPlayRepeatThread(m) {
                 remaining := bgInterval
                 while (remaining > 0 && macroPlaying) {
                     secs := Format("{:.1f}", remaining / 1000)
-                    ToolTip(" BG Left Click: " m.name " in " secs "s`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+                    ToolTip(" BG Left Click: " m.name " in " secs "s`n Z = next macro  |  F1 = Stop", 0, 0)
                     step := Min(remaining, 100)
                     Sleep(step)
                     remaining -= step
@@ -4900,7 +5038,7 @@ MacroPlayRepeatThread(m) {
                     SetControlDelay(-1)
                     ControlClick("x1 y1", arkwindow,,,,"Pos")
                 }
-                ToolTip(" BG Left Click: " m.name " CLICKED`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+
                 Sleep(50)
             }
         }
@@ -4912,15 +5050,18 @@ MacroPlayRepeatThread(m) {
             global macroActiveIdx := 0
             MacroSaveIfDirty()
         }
-        ToolTip()
-        if (!guiVisible) {
-            MainGui.Show("NoActivate")
-            global guiVisible := true
+        if (!macroArmed) {
+            ToolTip()
+            if (!guiVisible) {
+                MainGui.Show("NoActivate")
+                global guiVisible := true
+            }
         }
         return
     }
 
-    ; ── Normal (foreground) repeat mode ─────────────────────
+    ; ── Normal (foreground) ─────────────────────
+    hasPc := m.HasProp("popcornFilters") && m.popcornFilters.Length > 0
     if (m.repeatSpam) {
         MacroRepeatBuildTooltip(m, curKey)
         spamTick := 0
@@ -4939,6 +5080,12 @@ MacroPlayRepeatThread(m) {
                     Send("{" curKey "}")
             }
             spamTick++
+            if (hasPc && GetKeyState("f", "P")) {
+                while (GetKeyState("f", "P") && macroPlaying)
+                    Sleep(50)
+                MacroLog("RepeatPlay: F pressed — pausing for popcorn")
+                MacroRepeatPopcornSequence(m)
+            }
             if (Mod(spamTick, 125) = 0)
                 MacroRepeatBuildTooltip(m, curKey)
             Sleep(16)
@@ -4952,7 +5099,7 @@ MacroPlayRepeatThread(m) {
             while (remaining > 0 && macroPlaying) {
                 curKey := keys[macroRepeatKeyIdx]
                 secs := Format("{:.1f}", remaining / 1000)
-                moveHint := m.repeatMovement ? "  (move now)" : ""
+                moveHint := ""
                 qHint := keys.Length > 1 ? "`n Q = next key" : ""
                 ToolTip(" " m.name ": " curKey " in " secs "s" moveHint qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
                 step := Min(remaining, 100)
@@ -4972,7 +5119,13 @@ MacroPlayRepeatThread(m) {
                 else
                     Send("{" curKey "}")
             }
-            ToolTip(" " m.name ": " curKey " PRESSED`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
+            if (hasPc && GetKeyState("f", "P")) {
+                while (GetKeyState("f", "P") && macroPlaying)
+                    Sleep(50)
+                MacroLog("RepeatPlay: F pressed — pausing for popcorn")
+                MacroRepeatPopcornSequence(m)
+            }
+
             Sleep(50)
         }
     }
@@ -4993,12 +5146,12 @@ MacroRepeatBuildTooltip(m, curKey) {
         arrow := (i = macroRepeatKeyIdx) ? " ► " : "   "
         keyList .= "`n" arrow k
     }
-    ToolTip(" Spam: " curKey keyList qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
+    ToolTip(" Hold: " curKey keyList qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
 }
 
 MacroBgClickTooltip(m, intervalMs, isSpam) {
-    mode := isSpam ? "Spam" : "Interval: " intervalMs "ms"
-    ToolTip(" BG Left Click: " m.name "  (" mode ")`n [ = Slower   ] = Faster`n Z = next macro  |  F1 = Stop", 0, 0)
+    mode := isSpam ? "Hold" : "Interval: " intervalMs "ms"
+    ToolTip(" BG Left Click: " m.name "  (" mode ")`n Z = next macro  |  F1 = Stop", 0, 0)
 }
 
 MacroBgClickSlower(thisHotkey) {
@@ -5009,6 +5162,100 @@ MacroBgClickSlower(thisHotkey) {
 MacroBgClickFaster(thisHotkey) {
     global _macroBgInterval, autoclickIntervalStep, autoclickMinInterval
     global _macroBgInterval := Max(autoclickMinInterval, _macroBgInterval - autoclickIntervalStep)
+}
+
+MacroArmPopcornF(idx) {
+    global macroPopcornArmed, macroPopcornMacro, macroList
+    global macroPopcornArmed := true
+    global macroPopcornMacro := macroList[idx]
+    try Hotkey("$f", MacroPopcornFHandler, "On")
+    MacroLog("PopcornF: armed for '" macroList[idx].name "'")
+}
+
+MacroDisarmPopcornF() {
+    global macroPopcornArmed, macroPopcornMacro
+    global macroPopcornArmed := false
+    global macroPopcornMacro := ""
+    try Hotkey("$f", "Off")
+}
+
+MacroPopcornFHandler(*) {
+    global macroPopcornArmed, macroPopcornMacro, macroPlaying, macroArmed, arkwindow
+    if (!macroPopcornArmed || macroPlaying || !macroArmed)
+        return
+    if (!WinActive(arkwindow)) {
+        Send("{f}")
+        return
+    }
+    m := macroPopcornMacro
+    if (!IsObject(m)) {
+        MacroLog("PopcornF: no macro object — disarming")
+        MacroDisarmPopcornF()
+        return
+    }
+    MacroLog("PopcornF: F pressed — running popcorn for '" m.name "'")
+    MacroDisarmPopcornF()
+    SetTimer(MacroPopcornFThread.Bind(m), -1)
+}
+
+MacroPopcornFThread(m) {
+    global arkwindow, macroArmed, macroSelectedIdx, macroList
+    Send("{f}")
+    Sleep(200)
+    MacroRepeatPopcornSequence(m)
+    if (macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
+        sel := macroList[macroSelectedIdx]
+        if (sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0)
+            MacroArmPopcornF(macroSelectedIdx)
+        keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
+        ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n F = popcorn`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
+    }
+}
+
+MacroRepeatPopcornSequence(m) {
+    global pcInvDetectX, pcInvDetectY, pcEarlyExit, pcF1Abort, arkwindow, macroArmed
+    pcFilters := m.popcornFilters
+    style := m.popcornStyle
+    dropCount := (style = "amount") ? m.popcornDropCount : 0
+    if (pcFilters.Length = 0)
+        pcFilters := [""]
+    MacroLog("RepeatPopcorn: starting — style=" style " filters=" pcFilters.Length " dropCount=" dropCount)
+
+    deadline := A_TickCount + 5000
+    invOpen := false
+    while (A_TickCount < deadline) {
+        try {
+            if NFSearchTol(&fx, &fy, pcInvDetectX, pcInvDetectY, pcInvDetectX+2, pcInvDetectY+2, 0xFFFFFF, 10) {
+                invOpen := true
+                break
+            }
+        }
+        Sleep(50)
+    }
+    if (!invOpen) {
+        MacroLog("RepeatPopcorn: inventory never opened — aborting")
+        return
+    }
+    Sleep(200)
+
+    global pcEarlyExit := false
+    global pcF1Abort := false
+
+    for i, filt in pcFilters {
+        if (pcEarlyExit || pcF1Abort || !macroArmed)
+            break
+        MacroLog("RepeatPopcorn: filter " i "/" pcFilters.Length " = '" (filt = "" ? "(all)" : filt) "'")
+        if (filt != "")
+            PcApplyFilter(filt)
+        else if (pcFilters.Length > 1)
+            PcClearFilter()
+        Sleep(200)
+        PcRunDropLoop("repeat-pop-" i, dropCount)
+    }
+
+    Send("{Escape}")
+    Sleep(300)
+    MacroLog("RepeatPopcorn: done — inventory closed")
 }
 
 MacroPlayPyroThread(m) {
@@ -5182,7 +5429,7 @@ MacroSaveIfDirty() {
 }
 
 MacroStopPlay() {
-    global macroPlaying, macroActiveIdx, macroList, macroArmed, comboRunning, macroSpeedDirty
+    global macroPlaying, macroActiveIdx, macroList, macroArmed, comboRunning, macroSpeedDirty, macroPopcornArmed, macroPopcornMacro
     wasIdx := macroActiveIdx
     wasName := (wasIdx > 0 && wasIdx <= macroList.Length) ? macroList[wasIdx].name : "?"
     wasType := (wasIdx > 0 && wasIdx <= macroList.Length) ? macroList[wasIdx].type : "?"
@@ -5190,12 +5437,14 @@ MacroStopPlay() {
     global macroPlaying := false
     global macroActiveIdx := 0
     global macroArmed := false
+    MacroDisarmPopcornF()
     if (comboRunning)
         global comboRunning := false
     if (wasIdx > 0 && wasIdx <= macroList.Length) {
         if (macroList[wasIdx].type = "pyro")
             Send("{r Up}")
     }
+    ToolTip()
     MacroSaveIfDirty()
 }
 
@@ -5211,7 +5460,7 @@ MacroDeleteSelected(*) {
         return
     }
     name := m.name
-    result := MsgBox("Delete '" name "'?", "Delete Macro", "YesNo Icon!")
+    result := MsgBox("Delete '" name "'?", "Delete Macro", "YesNo")
     if (result = "Yes") {
         MacroRegisterHotkeys(false)
         macroList.RemoveAt(row)
@@ -5268,11 +5517,9 @@ MacroShowEditRecorded(idx) {
     macroEditGui.Add("Text", "x15 y72 w55 h24 +0x200", "Hotkey:")
     global meHkEdit := macroEditGui.Add("Edit", "x75 y72 w100 h24 ReadOnly", m.hotkey)
     meHkEdit.SetFont("s9 c000000", "Segoe UI")
-    meHkDetect := macroEditGui.Add("Button", "x180 y72 w35 h24", "Set")
-    meHkDetect.SetFont("s8 cDDDDDD", "Segoe UI")
+    meHkDetect := DarkBtn(macroEditGui, "x180 y72 w35 h24", "Set", _RED_BGR, _DK_BG, -11, true)
     meHkDetect.OnEvent("Click", MacroEditDetectHk)
-    meHkClear := macroEditGui.Add("Button", "x218 y72 w22 h24", "X")
-    meHkClear.SetFont("s8 cDDDDDD", "Segoe UI")
+    meHkClear := DarkBtn(macroEditGui, "x218 y72 w22 h24", "X", _RED_BGR, _DK_BG, -11, true)
     meHkClear.OnEvent("Click", (*) => meHkEdit.Value := "")
     macroEditGui.Add("Text", "x15 y102 w55 h24 +0x200", "Speed:")
     global meSpeedEdit := macroEditGui.Add("Edit", "x75 y102 w65 h24", Format("{:.3f}", m.speedMult))
@@ -5291,14 +5538,12 @@ MacroShowEditRecorded(idx) {
         macroEditGui.Add("Text", "x100 y132 w140 h20", m.events.Length " events")
     }
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    meSaveBtn := macroEditGui.Add("Button", "x15 y160 w100 h26", "Save")
-    meSaveBtn.SetFont("s9 Bold cFF4444", "Segoe UI")
+    meSaveBtn := DarkBtn(macroEditGui, "x15 y160 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     meSaveBtn.OnEvent("Click", MacroDoEditRecorded.Bind(idx))
-    meCancelBtn := macroEditGui.Add("Button", "x120 y160 w100 h26", "Cancel")
-    meCancelBtn.SetFont("s9 cDDDDDD", "Segoe UI")
+    meCancelBtn := DarkBtn(macroEditGui, "x120 y160 w100 h26", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     meCancelBtn.OnEvent("Click", MacroEditCancel)
     macroEditGui.OnEvent("Close", MacroEditCancel)
-    macroEditGui.Show("AutoSize")
+    macroEditGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 MacroEditDetectHk(*) {
@@ -5351,65 +5596,106 @@ MacroShowEditRepeat(idx) {
     }
     global macroEditGui := Gui("+AlwaysOnTop", "Edit Key Repeat")
     macroEditGui.BackColor := "1A1A1A"
+    px := 16
+    y := 16
     macroEditGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-    macroEditGui.Add("Text", "x15 y15 w220", "Edit: " m.name)
+    macroEditGui.Add("Text", "x" px " y" y " w250", "Edit: " m.name)
+    meHelpBtn := DarkBtn(macroEditGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
+    meHelpBtn.OnEvent("Click", MacroRepeatShowHelp)
+    y += 30
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    macroEditGui.Add("Text", "x15 y42 w55 h24 +0x200", "Name:")
-    global meNameEdit := macroEditGui.Add("Edit", "x75 y42 w165 h24", m.name)
+    macroEditGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Name:")
+    global meNameEdit := macroEditGui.Add("Edit", "x130 y" y " w190 h24", m.name)
     meNameEdit.SetFont("s9 c000000", "Segoe UI")
-    macroEditGui.Add("Text", "x15 y72 w55 h24 +0x200", "Keys:")
+    y += 30
+    macroEditGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Keys:")
     global meKeyList := []
     for , k in m.repeatKeys
         meKeyList.Push(k)
     keyDisplay := ""
     for i, k in meKeyList
         keyDisplay .= (i > 1 ? ", " : "") k
-    global meKeyEdit := macroEditGui.Add("Edit", "x75 y72 w100 h24 ReadOnly", keyDisplay)
+    global meKeyEdit := macroEditGui.Add("Edit", "x130 y" y " w120 h24 ReadOnly", keyDisplay)
     meKeyEdit.SetFont("s9 c000000", "Segoe UI")
-    meKeyAdd := macroEditGui.Add("Button", "x180 y72 w35 h24", "Add")
-    meKeyAdd.SetFont("s8 cDDDDDD", "Segoe UI")
+    meKeyAdd := DarkBtn(macroEditGui, "x260 y" y " w35 h24", "Add", _RED_BGR, _DK_BG, -11, true)
     meKeyAdd.OnEvent("Click", MacroEditDetectKey)
-    meKeyClear := macroEditGui.Add("Button", "x218 y72 w22 h24", "X")
-    meKeyClear.SetFont("s8 cDDDDDD", "Segoe UI")
+    meKeyClear := DarkBtn(macroEditGui, "x298 y" y " w22 h24", "X", _RED_BGR, _DK_BG, -11, true)
     meKeyClear.OnEvent("Click", MacroEditClearKeys)
+    y += 24
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
-    macroEditGui.Add("Text", "x75 y97 w165 h14", "Q cycles between keys during play")
+    macroEditGui.Add("Text", "x130 y" y " w190 h14", "Q cycles between keys during play")
+    y += 22
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    macroEditGui.Add("Text", "x15 y114 w55 h24 +0x200", "Every:")
-    global meIntervalEdit := macroEditGui.Add("Edit", "x75 y114 w65 h24 +Number", String(m.repeatInterval))
+    macroEditGui.Add("Text", "x" px " y" y " w110 h24 +0x200", "Interval (ms):")
+    _editInterval := (m.HasProp("repeatSpam") && m.repeatSpam) ? 0 : m.repeatInterval
+    global meIntervalEdit := macroEditGui.Add("Edit", "x130 y" y " w65 h24 +Number", String(_editInterval))
     meIntervalEdit.SetFont("s9 c000000", "Segoe UI")
-    macroEditGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroEditGui.Add("Text", "x145 y114 w30 h24 +0x200", "ms")
+    macroEditGui.SetFont("s8 c888888", "Segoe UI")
+    macroEditGui.Add("Text", "x200 y" (y + 2) " w80 h20", "(0 = hold)")
+    y += 30
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    global meSpamChk := macroEditGui.Add("CheckBox", "x15 y142 w70 h24", "Spam")
-    global meMoveChk := macroEditGui.Add("CheckBox", "x90 y142 w145 h24", "Move between")
-    meSpamChk.Value := m.repeatSpam
-    meMoveChk.Value := m.repeatMovement
-    meSpamChk.OnEvent("Click", MacroEditSpamToggle)
-    meMoveChk.OnEvent("Click", MacroEditMoveToggle)
-    macroEditGui.Add("Text", "x15 y170 w55 h24 +0x200", "Bind:")
-    global meBindEdit := macroEditGui.Add("Edit", "x75 y170 w100 h24 ReadOnly", m.hotkey)
+    macroEditGui.Add("Text", "x" px " y" y " w100 h24 +0x200", "Bind:")
+    global meBindEdit := macroEditGui.Add("Edit", "x130 y" y " w80 h24 ReadOnly", m.hotkey)
     meBindEdit.SetFont("s9 c000000", "Segoe UI")
-    meBindDetect := macroEditGui.Add("Button", "x180 y170 w35 h24", "Set")
-    meBindDetect.SetFont("s8 cDDDDDD", "Segoe UI")
+    meBindDetect := DarkBtn(macroEditGui, "x215 y" y " w60 h24", "Set", _RED_BGR, _DK_BG, -11, true)
     meBindDetect.OnEvent("Click", MacroEditDetectBind)
-    meBindClear := macroEditGui.Add("Button", "x218 y170 w22 h24", "X")
-    meBindClear.SetFont("s8 cDDDDDD", "Segoe UI")
+    meBindClear := DarkBtn(macroEditGui, "x280 y" y " w22 h24", "X", _RED_BGR, _DK_BG, -11, true)
     meBindClear.OnEvent("Click", (*) => meBindEdit.Value := "")
-    meSaveBtn := macroEditGui.Add("Button", "x15 y202 w100 h26", "Save")
-    meSaveBtn.SetFont("s9 Bold cFF4444", "Segoe UI")
+    y += 34
+    macroEditGui.Add("Progress", "x" px " y" y " w318 h1 Background333333")
+    y += 8
+    _hasPc := (m.HasProp("popcornFilters") && m.popcornFilters.Length > 0)
+    global mePcVar := _hasPc ? 1 : 0
+    global mePcCheck := macroEditGui.Add("CheckBox", "x" px " y" y " w200 h24", "Popcorn after repeat")
+    mePcCheck.Value := _hasPc ? 1 : 0
+    mePcCheck.OnEvent("Click", MacroEditRepeatTogglePc)
+    y += 26
+    global mePcFrameY := y
+    macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global mePcDropLbl := macroEditGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop count:")
+    macroEditGui.SetFont("s9 c000000", "Segoe UI")
+    _dcVal := (m.HasProp("popcornDropCount")) ? String(m.popcornDropCount) : "0"
+    global mePcDropEdit := macroEditGui.Add("Edit", "x" (130 + 16) " y" y " w60 h24 +Number", _dcVal)
+    macroEditGui.SetFont("s8 c888888", "Segoe UI")
+    global mePcDropHint := macroEditGui.Add("Text", "x" (195 + 16) " y" (y + 2) " w80 h20", "(0 = all)")
+    y += 28
+    macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global mePcKeyLbl := macroEditGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop key:")
+    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    global mePcKeyVal := macroEditGui.Add("Text", "x" (130 + 16) " y" y " w60 h24 +0x200", StrUpper(pcDropKey != "" ? pcDropKey : "?"))
+    global meSaveBtn := DarkBtn(macroEditGui, "x" px " y300 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     meSaveBtn.OnEvent("Click", MacroDoEditRepeat.Bind(idx))
-    meCancelBtn := macroEditGui.Add("Button", "x120 y202 w100 h26", "Cancel")
-    meCancelBtn.SetFont("s9 cDDDDDD", "Segoe UI")
+    global meCancelBtn := DarkBtn(macroEditGui, "x200 y300 w100 h26", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     meCancelBtn.OnEvent("Click", MacroEditCancel)
     macroEditGui.OnEvent("Close", MacroEditCancel)
-    macroEditGui.Show("AutoSize")
+    MacroEditRepeatTogglePc()
+    macroEditGui.Show("w350 h340 " MacroPopupPos(350))
+}
+
+MacroEditRepeatTogglePc(*) {
+    global mePcCheck, mePcDropLbl, mePcDropEdit, mePcDropHint, mePcKeyLbl, mePcKeyVal
+    global meSaveBtn, meCancelBtn, mePcFrameY, macroEditGui
+    show := mePcCheck.Value
+    mePcDropLbl.Visible := show
+    mePcDropEdit.Visible := show
+    mePcDropHint.Visible := show
+    mePcKeyLbl.Visible := show
+    mePcKeyVal.Visible := show
+    if (show) {
+        btnY := mePcFrameY + 66
+    } else {
+        btnY := mePcFrameY + 4
+    }
+    meSaveBtn.Move(, btnY)
+    meCancelBtn.Move(, btnY)
+    macroEditGui.Show("w350 h" (btnY + 42) " NoActivate")
 }
 
 MacroEditDetectKey(*) {
     global meKeyEdit, macroDetectedMouse, meKeyList
     meKeyEdit.Value := "press any key or click..."
     global macroDetectedMouse := ""
+    MacroDetectStart()
     Sleep(300)
     try Hotkey("~*RButton", MacroDetectRMouse, "On")
     try Hotkey("~*LButton", MacroDetectLMouse, "On")
@@ -5425,6 +5711,7 @@ MacroEditDetectKey(*) {
     try Hotkey("~*RButton", "Off")
     try Hotkey("~*LButton", "Off")
     try Hotkey("~*MButton", "Off")
+    MacroDetectEnd()
     newKey := ""
     if (macroDetectedMouse != "")
         newKey := StrLower(macroDetectedMouse)
@@ -5444,22 +5731,13 @@ MacroEditClearKeys(*) {
     meKeyEdit.Value := ""
 }
 
-MacroEditSpamToggle(*) {
-    global meSpamChk, meMoveChk
-    if (meSpamChk.Value)
-        meMoveChk.Value := 0
-}
 
-MacroEditMoveToggle(*) {
-    global meSpamChk, meMoveChk
-    if (meMoveChk.Value)
-        meSpamChk.Value := 0
-}
 
 MacroEditDetectBind(*) {
     global meBindEdit, macroDetectedMouse
     meBindEdit.Value := "press any key or click..."
     global macroDetectedMouse := ""
+    MacroDetectStart()
     Sleep(300)
     try Hotkey("~*RButton", MacroDetectRMouse, "On")
     try Hotkey("~*LButton", MacroDetectLMouse, "On")
@@ -5475,6 +5753,7 @@ MacroEditDetectBind(*) {
     try Hotkey("~*RButton", "Off")
     try Hotkey("~*LButton", "Off")
     try Hotkey("~*MButton", "Off")
+    MacroDetectEnd()
     if (macroDetectedMouse != "")
         meBindEdit.Value := StrLower(macroDetectedMouse)
     else if (ih.EndReason = "EndKey")
@@ -5485,7 +5764,7 @@ MacroEditDetectBind(*) {
 
 MacroDoEditRepeat(idx, *) {
     global macroList, macroEditGui, macroTabActive
-    global meNameEdit, meKeyList, meIntervalEdit, meSpamChk, meMoveChk, meBindEdit
+    global meNameEdit, meKeyList, meIntervalEdit, meBindEdit, mePcCheck, mePcDropEdit
     name := Trim(meNameEdit.Value)
     if (name = "" || meKeyList.Length = 0) {
         ToolTip("Name and at least one key required!")
@@ -5500,9 +5779,18 @@ MacroDoEditRepeat(idx, *) {
     m.repeatKeys := []
     for , k in meKeyList
         m.repeatKeys.Push(k)
-    m.repeatInterval := Integer(meIntervalEdit.Value > 0 ? meIntervalEdit.Value : 1000)
-    m.repeatSpam := meSpamChk.Value
-    m.repeatMovement := meMoveChk.Value
+    m.repeatInterval := Integer(meIntervalEdit.Value >= 0 ? meIntervalEdit.Value : 600)
+    m.repeatSpam := (m.repeatInterval = 0) ? 1 : 0
+    if (mePcCheck.Value) {
+        dc := Integer(mePcDropEdit.Value)
+        m.popcornFilters := [""]
+        m.popcornStyle := (dc = 0) ? "all" : "amount"
+        m.popcornDropCount := dc
+    } else {
+        m.popcornFilters := []
+        m.popcornStyle := "all"
+        m.popcornDropCount := 0
+    }
     macroList[idx] := m
     MacroSaveAll()
     MacroUpdateListView()
@@ -5577,14 +5865,7 @@ MacroZCycle(*) {
     sel := macroList[macroSelectedIdx]
     keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
     MacroLog("ZCycle: → #" macroSelectedIdx " '" sel.name "' type=" sel.type)
-    if (sel.type = "guided") {
-        MacroPlayByIndex(macroSelectedIdx)
-    } else if (sel.type = "combo") {
-        MacroPlayByIndex(macroSelectedIdx)
-    } else {
-        ToolTip(" ► " sel.name keyStr "`n Press hotkey to run  |  Z = next  |  F1 = Stop", 0, 0)
-        SetTimer(() => ToolTip(), -3000)
-    }
+    ToolTip(" ► " sel.name keyStr "`n Press hotkey to run  |  Z = next  |  F1 = Stop", 0, 0)
 }
 
 MacroTuneSelected(*) {
@@ -5721,17 +6002,18 @@ MacroRegisterHotkeys(enable) {
     global macroList, macroSelectedIdx, macroTabActive, macroHotkeysLive, macroArmed
     global pcMode, pcF10Step
     global macroHotkeysLive := enable
+    MacroDisarmPopcornF()
     if (enable) {
         if (pcMode = 0 && pcF10Step = 0)
             try Hotkey("$z", MacroZCycle, "On")
         if (macroTabActive) {
-            try Hotkey("$Up", MacroSpeedUp, "On")
-            try Hotkey("$Down", MacroSpeedDown, "On")
+            try Hotkey("$[", MacroSpeedUp, "On")
+            try Hotkey("$]", MacroSpeedDown, "On")
         }
     } else {
         try Hotkey("$z", "Off")
-        try Hotkey("$Up", "Off")
-        try Hotkey("$Down", "Off")
+        try Hotkey("$[", "Off")
+        try Hotkey("$]", "Off")
     }
     for i, m in macroList {
         if (m.hotkey != "" && m.hotkey != "..." && m.hotkey != "q" && m.hotkey != "f") {
@@ -5757,8 +6039,8 @@ MacroBlockAllHotkeys() {
     global macroList, macroHotkeysLive
     global macroHotkeysLive := false
     try Hotkey("$z", "Off")
-    try Hotkey("$Up", "Off")
-    try Hotkey("$Down", "Off")
+    try Hotkey("$[", "Off")
+    try Hotkey("$]", "Off")
     for i, m in macroList {
         if (m.hotkey != "" && m.hotkey != "..." && m.hotkey != "q" && m.hotkey != "f") {
             if (m.hotkey = "r" && imprintScanning)
@@ -5787,7 +6069,7 @@ MacroSpeedDown(*) {
     if (!macroPlaying)
         MacroUpdateListView()
     bar := MacroSpeedBar(m.speedMult)
-    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  SLOWER`n " bar "`n Down = slower  Up = faster  |  0.10x=fast  2.00x=slow", 0, 0)
+    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  SLOWER`n " bar, 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
 
@@ -5809,7 +6091,7 @@ MacroSpeedUp(*) {
     if (!macroPlaying)
         MacroUpdateListView()
     bar := MacroSpeedBar(m.speedMult)
-    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  FASTER`n " bar "`n Down = slower  Up = faster  |  0.10x=fast  2.00x=slow", 0, 0)
+    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  FASTER`n " bar, 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
 
@@ -5830,7 +6112,7 @@ MacroSpeedBar(sp) {
 
 MacroSpeedHint(m) {
     sp := m.HasProp("speedMult") ? m.speedMult : 1.0
-    return " Speed: " Format("{:.1f}x", sp) "  (↑↓ adjust)"
+    return " Speed: " Format("{:.1f}x", sp)
 }
 
 MacroShowHelp(*) {
@@ -5842,39 +6124,23 @@ MacroShowHelp(*) {
     global macroHelpGui := Gui("+AlwaysOnTop", "Macro Help")
     macroHelpGui.BackColor := "1A1A1A"
     macroHelpGui.SetFont("s10 Bold cFF4444", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y10 w350 Center", "Macro Tab — Quick Reference")
+    macroHelpGui.Add("Text", "x15 y10 w350 Center", "Macro Tab — Help")
     macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y38 w350", "CREATING MACROS")
+    macroHelpGui.Add("Text", "x15 y38 w350", "CONTROLS")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y55 w350", "+ Guided → Take: click+T items from vault grid (set slot count)")
-    macroHelpGui.Add("Text", "x15 y70 w350", "+ Guided → Popcorn: click+drop items from grid (set slot count)")
-    macroHelpGui.Add("Text", "x15 y85 w350", "+ Guided → Record: manually record clicks/keys in inventory")
-    macroHelpGui.Add("Text", "x15 y100 w350", "+ Key Repeat: spam keys on interval (e.g. yuty roar)")
-    macroHelpGui.Add("Text", "x15 y115 w350", "+ Popcorn+MagicF: drop items then give to trough")
+    macroHelpGui.Add("Text", "x15 y55 w350", "F3 / Start → arm selected macro")
+    macroHelpGui.Add("Text", "x15 y70 w350", "F → run at inventory  |  Q → cycle / single item")
+    macroHelpGui.Add("Text", "x15 y85 w350", "Z → next macro  |  F1 → stop & show UI")
     macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y138 w350", "USING MACROS")
+    macroHelpGui.Add("Text", "x15 y108 w350", "COMBO (Popcorn+MagicF)")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y155 w350", "Select macro → F3 or Start → activates in ARK")
-    macroHelpGui.Add("Text", "x15 y170 w350", "F at inventory → runs macro (Take/Popcorn/Record)")
-    macroHelpGui.Add("Text", "x15 y185 w350", "Q → toggle single item mode (take 1 instead of all)")
-    macroHelpGui.Add("Text", "x15 y200 w350", "Z → cycle to next macro  |  F1 → stop / show UI")
-    macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y223 w350", "COMBO (Popcorn+MagicF)")
-    macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y240 w350", "F → open inv & popcorn  |  R → close inv, stay armed")
-    macroHelpGui.Add("Text", "x15 y255 w350", "Q → swap Popcorn ↔ MagicF  |  Z → exit combo")
-    macroHelpGui.Add("Text", "x15 y270 w350", "MagicF: F at trough → filter+give → auto-close → repeat")
-    macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y293 w350", "MANAGING")
-    macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y310 w350", "Edit → change settings / re-record actions")
-    macroHelpGui.Add("Text", "x15 y325 w350", "Tune → binary search for fastest reliable speed")
-    macroHelpGui.Add("Text", "x15 y340 w350", "▲▼ → reorder  |  Delete → remove macro")
+    macroHelpGui.Add("Text", "x15 y125 w350", "F → open inv & drop  |  R → close inv")
+    macroHelpGui.Add("Text", "x15 y140 w350", "Q → swap Popcorn ↔ MagicF  |  Z → exit")
     macroHelpGui.SetFont("s9 c888888", "Segoe UI")
-    btnClose := macroHelpGui.Add("Button", "x130 y365 w120 h26", "Close")
+    btnClose := DarkBtn(macroHelpGui, "x130 y168 w120 h26", "Close", 0xDDDDDD, _DK_BG, -12, false)
     btnClose.OnEvent("Click", (*) => macroHelpGui.Destroy())
     macroHelpGui.OnEvent("Close", (*) => macroHelpGui.Destroy())
-    macroHelpGui.Show("AutoSize")
+    macroHelpGui.Show("AutoSize " MacroPopupPos(350))
 }
 global macroHelpGui := ""
 
@@ -5883,6 +6149,14 @@ MacroIsBusy() {
     global runClaimAndNameScript, runNameAndSpayScript, runMagicFScript
     global pcMode, pcF10Step, AutoSimCheck, gmkMode
     return (qhRunning || obUploadRunning || obDownloadRunning || pcRunning || acRunning || runClaimAndNameScript || runNameAndSpayScript || runMagicFScript || comboRunning || pcMode > 0 || pcF10Step > 0 || AutoSimCheck || gmkMode != "off")
+}
+
+MacroPopupPos(dlgW := 350) {
+    px := 177 + 450 + 10
+    py := 330
+    if (px + dlgW > A_ScreenWidth)
+        px := Max(0, 177 - dlgW - 10)
+    return "x" px " y" py
 }
 
 MacroDialogOpen() {
@@ -5926,8 +6200,10 @@ MacroHotkeyHandler(idx, thisHotkey) {
             global macroArmed := true
             MacroRegisterHotkeys(true)
             keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
-            ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
-            SetTimer(() => ToolTip(), -3000)
+            _pcH := (sel.type = "repeat" && sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0) ? "`n F = popcorn" : ""
+            if (_pcH != "")
+                MacroArmPopcornF(idx)
+            ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) _pcH "`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
         }
         return
     }
@@ -6004,7 +6280,257 @@ GuidedStartWizard(*) {
         return
     }
     MacroBlockAllHotkeys()
-    GuidedShowStep1()
+    GuidedShowSinglePage()
+}
+
+GuidedShowSinglePage() {
+    global guidedWizGui, guidedInvType, guidedActionType, pcDropKey
+    try {
+        if (guidedWizGui != "")
+            guidedWizGui.Destroy()
+    }
+    guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro")
+    guidedWizGui.BackColor := "1A1A1A"
+    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.Add("Text", "x16 y16 w250", "Guided Macro")
+    gHelpBtn := DarkBtn(guidedWizGui, "x300 y14 w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
+    gHelpBtn.OnEvent("Click", GuidedShowSinglePageHelp)
+
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedWizGui.Add("Text", "x16 y44 w100 h24 +0x200", "Inventory:")
+    global guidedSpInvDDL := guidedWizGui.Add("DropDownList", "x130 y44 w190", ["Vault", "Player Inventory", "Crafting"])
+    guidedSpInvDDL.Value := 1
+    guidedSpInvDDL.SetFont("s9 c000000", "Segoe UI")
+    guidedSpInvDDL.OnEvent("Change", GuidedSpUpdateFields)
+
+    guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
+    global guidedSpCraftHint := guidedWizGui.Add("Text", "x130 y19 w200", "drop/take — craft tab to craft")
+    guidedSpCraftHint.Visible := false
+
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedWizGui.Add("Text", "x16 y72 w100 h24 +0x200", "Action:")
+    global guidedSpActionDDL := guidedWizGui.Add("DropDownList", "x130 y72 w190", ["Popcorn", "Take"])
+    guidedSpActionDDL.Value := 1
+    guidedSpActionDDL.SetFont("s9 c000000", "Segoe UI")
+    guidedSpActionDDL.OnEvent("Change", GuidedSpUpdateFields)
+
+    guidedWizGui.Add("Progress", "x16 y104 w318 h1 Background333333")
+
+    fieldY := 112
+    global guidedSpTakeLbls := []
+    global guidedSpTakeEdits := []
+    global guidedSpTakeHints := []
+
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" fieldY " w100 h24 +0x200", "Count:"))
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpCountEdit := guidedWizGui.Add("Edit", "x130 y" fieldY " w60 h24 +Number", "0")
+    guidedSpCountEdit.OnEvent("Change", GuidedSpUpdateName)
+    guidedSpTakeEdits.Push(guidedSpCountEdit)
+    guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
+    guidedSpTakeHints.Push(guidedWizGui.Add("Text", "x195 y" (fieldY+4) " w120", "(0 = all)"))
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+28) " w110 h24 +0x200", "Search filter:"))
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpTakeFilterEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+28) " w190 h24", "")
+    guidedSpTakeEdits.Push(guidedSpTakeFilterEdit)
+    guidedWizGui.SetFont("s8 c888888", "Segoe UI")
+    guidedSpTakeHints.Push(guidedWizGui.Add("Text", "x130 y" (fieldY+52) " w190", "(blank = no filter)"))
+
+    global guidedSpPcLbls := []
+    global guidedSpPcEdits := []
+    global guidedSpPcHints := []
+
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpPcLbls.Push(guidedWizGui.Add("Text", "x16 y" fieldY " w100 h24 +0x200", "Drop count:"))
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpDropCountEdit := guidedWizGui.Add("Edit", "x130 y" fieldY " w60 h24 +Number", "0")
+    guidedSpDropCountEdit.OnEvent("Change", GuidedSpUpdateName)
+    guidedSpPcEdits.Push(guidedSpDropCountEdit)
+    guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
+    guidedSpPcHints.Push(guidedWizGui.Add("Text", "x195 y" (fieldY+4) " w120", "(0 = all)"))
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpPcLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+28) " w100 h24 +0x200", "Drop key:"))
+    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    dropKeyStr := (pcDropKey != "" ? StrUpper(pcDropKey) : "?")
+    global guidedSpDropKeyLbl := guidedWizGui.Add("Text", "x130 y" (fieldY+28) " w60 h24 +0x200", dropKeyStr)
+    guidedSpPcLbls.Push(guidedSpDropKeyLbl)
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpPcLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+56) " w110 h24 +0x200", "Search filter:"))
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpPcFilterEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+56) " w190 h24", "")
+    guidedSpPcEdits.Push(guidedSpPcFilterEdit)
+    guidedWizGui.SetFont("s8 c888888", "Segoe UI")
+    guidedSpPcHints.Push(guidedWizGui.Add("Text", "x130 y" (fieldY+80) " w190", "(blank = no filter)"))
+
+    global guidedSpBottomSep := guidedWizGui.Add("Progress", "x16 y200 w318 h1 Background333333")
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global guidedSpNameLbl := guidedWizGui.Add("Text", "x16 y208 w55 h24 +0x200", "Name:")
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpNameEdit := guidedWizGui.Add("Edit", "x75 y208 w245 h24", "")
+    global guidedSpSaveBtn := DarkBtn(guidedWizGui, "x16 y240 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
+    guidedSpSaveBtn.OnEvent("Click", GuidedSpSave)
+    global guidedSpCancelBtn := DarkBtn(guidedWizGui, "x200 y240 w100 h26", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
+    guidedSpCancelBtn.OnEvent("Click", GuidedCancel)
+    guidedWizGui.OnEvent("Close", GuidedCancel)
+
+    GuidedSpUpdateFields()
+    guidedWizGui.Show("w350 h280 " MacroPopupPos(350))
+}
+
+GuidedSpUpdateFields(*) {
+    global guidedSpInvDDL, guidedSpActionDDL
+    global guidedSpTakeLbls, guidedSpTakeEdits, guidedSpTakeHints
+    global guidedSpPcLbls, guidedSpPcEdits, guidedSpPcHints
+    global guidedSpBottomSep, guidedSpNameLbl, guidedSpNameEdit
+    global guidedSpSaveBtn, guidedSpCancelBtn, guidedWizGui, guidedSpCraftHint
+
+    invIdx := guidedSpInvDDL.Value
+    isPlayer := (invIdx = 2)
+    isCrafting := (invIdx = 3)
+    guidedSpCraftHint.Visible := isCrafting
+
+    curAction := guidedSpActionDDL.Value
+    if (isPlayer) {
+        guidedSpActionDDL.Delete()
+        guidedSpActionDDL.Add(["Give", "Popcorn"])
+    } else {
+        guidedSpActionDDL.Delete()
+        guidedSpActionDDL.Add(["Popcorn", "Take"])
+    }
+    guidedSpActionDDL.Value := curAction > 0 ? Min(curAction, 2) : 1
+
+    actionIdx := guidedSpActionDDL.Value
+    if (isPlayer) {
+        isTake := (actionIdx = 1)
+        isPopcorn := (actionIdx = 2)
+    } else {
+        isPopcorn := (actionIdx = 1)
+        isTake := (actionIdx = 2)
+    }
+
+    for , c in guidedSpTakeLbls
+        c.Visible := isTake
+    for , c in guidedSpTakeEdits
+        c.Visible := isTake
+    for , c in guidedSpTakeHints
+        c.Visible := isTake
+    for , c in guidedSpPcLbls
+        c.Visible := isPopcorn
+    for , c in guidedSpPcEdits
+        c.Visible := isPopcorn
+    for , c in guidedSpPcHints
+        c.Visible := isPopcorn
+
+    if (isTake)
+        bottomY := 112 + 66 + 4
+    else
+        bottomY := 112 + 100 + 4
+
+    guidedSpBottomSep.Move(, bottomY)
+    guidedSpNameLbl.Move(, bottomY + 8)
+    guidedSpNameEdit.Move(, bottomY + 8)
+    guidedSpSaveBtn.Move(, bottomY + 40)
+    guidedSpCancelBtn.Move(, bottomY + 40)
+    dlgH := bottomY + 76
+    GuidedSpUpdateName()
+    guidedWizGui.Show("w350 h" dlgH " NoActivate")
+    DllCall("RedrawWindow", "Ptr", guidedWizGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0107)
+}
+
+GuidedSpUpdateName(*) {
+    global guidedSpInvDDL, guidedSpActionDDL, guidedSpNameEdit
+    global guidedSpCountEdit, guidedSpDropCountEdit
+    invIdx := guidedSpInvDDL.Value
+    isPlayer := (invIdx = 2)
+    actionIdx := guidedSpActionDDL.Value
+    invNames := ["Vault", "Player", "Crafting"]
+    if (isPlayer) {
+        actionNames := ["Give", "Popcorn"]
+        isTake := (actionIdx = 1)
+    } else {
+        actionNames := ["Popcorn", "Take"]
+        isTake := (actionIdx = 2)
+    }
+    countVal := ""
+    if (isTake) {
+        try countVal := guidedSpCountEdit.Value
+    } else {
+        try countVal := guidedSpDropCountEdit.Value
+    }
+    unitStr := (countVal != "" && countVal != "0") ? " " countVal : ""
+    guidedSpNameEdit.Value := invNames[invIdx] " " actionNames[actionIdx] unitStr
+}
+
+GuidedShowSinglePageHelp(*) {
+    static hGui := ""
+    if IsObject(hGui) {
+        try hGui.Destroy()
+        hGui := ""
+        return
+    }
+    hGui := Gui("+AlwaysOnTop +ToolWindow", "Guided Macro Help")
+    hGui.BackColor := "1A1A1A"
+    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.Add("Text", "x10 y8 w280", "GUIDED MACRO")
+    hGui.SetFont("s8 cDDDDDD", "Segoe UI")
+    hGui.Add("Text", "x10 y30 w280",
+        "Pick inventory type and action.`n"
+        "Take: click + T each slot (transfers items).`n"
+        "Popcorn: hover + drop key (discards items).`n"
+        "Give: player inv → other inv (skip implant).`n"
+        "Record: manually record clicks/keys.`n`n"
+        "Use search filter to target specific items.`n"
+        "Leave blank to affect all items in grid.`n"
+        "F at inventory to run. Z = next. F1 = stop.")
+    hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
+    hGui.Show("w300 h200 " MacroPopupPos(300))
+}
+
+GuidedSpSave(*) {
+    global guidedWizGui, guidedSpInvDDL, guidedSpActionDDL, guidedSpNameEdit
+    global guidedSpCountEdit, guidedSpTakeFilterEdit
+    global guidedSpDropCountEdit, guidedSpPcFilterEdit
+    global guidedInvType, guidedActionType
+    global pcDropKey
+
+    invMap := Map(1, "vault", 2, "player", 3, "crafting")
+    global guidedInvType := invMap.Has(guidedSpInvDDL.Value) ? invMap[guidedSpInvDDL.Value] : "vault"
+
+    isPlayer := (guidedSpInvDDL.Value = 2)
+    actionIdx := guidedSpActionDDL.Value
+    actionMap := isPlayer ? Map(1, "give", 2, "popcorn") : Map(1, "popcorn", 2, "take")
+    global guidedActionType := actionMap.Has(actionIdx) ? actionMap[actionIdx] : "popcorn"
+
+    if (guidedActionType = "popcorn") {
+        savedDrop := ""
+        try savedDrop := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
+        if (savedDrop = "") {
+            guidedWizGui.Destroy()
+            global guidedWizGui := ""
+            GuidedShowDropKeyPrompt("popcorn")
+            return
+        }
+    }
+
+    if (guidedActionType = "take") {
+        global guidedTakeCount := Integer(guidedSpCountEdit.Value)
+        global guidedTakeEdit := guidedSpCountEdit
+        global guidedTakeFilterEdit := guidedSpTakeFilterEdit
+        global guidedTakeNameEdit := guidedSpNameEdit
+        GuidedTakeSave()
+    } else if (guidedActionType = "give") {
+        global guidedGiveEdit := guidedSpCountEdit
+        global guidedGiveFilterEdit := guidedSpTakeFilterEdit
+        global guidedGiveNameEdit := guidedSpNameEdit
+        GuidedGiveSave()
+    } else if (guidedActionType = "popcorn") {
+        global guidedPcSlotsEdit := guidedSpDropCountEdit
+        global guidedPcDropKeyEdit := {Value: pcDropKey}
+        global guidedPcFilterEdit := guidedSpPcFilterEdit
+        global guidedPcNameEdit := guidedSpNameEdit
+        GuidedPopcornSave()
+    }
 }
 
 GuidedShowStep1() {
@@ -6023,14 +6549,12 @@ GuidedShowStep1() {
     global guidedInvDDL := guidedWizGui.Add("DropDownList", "x15 y95 w200", ["Vault/Forge/non-craft.", "Player Inventory", "Crafting"])
     guidedInvDDL.Value := 1
     guidedInvDDL.SetFont("s9 c000000", "Segoe UI")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := guidedWizGui.Add("Button", "x15 y135 w100 h28", "Next →")
+    btnNext := DarkBtn(guidedWizGui, "x15 y135 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", GuidedStep1Next)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y135 w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y135 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedStep1Next(*) {
@@ -6057,27 +6581,23 @@ GuidedShowActionStep() {
         global guidedActionDDL := guidedWizGui.Add("DropDownList", "x15 y115 w200", ["Give", "Popcorn", "Record"])
         guidedActionDDL.Value := 1
         guidedActionDDL.SetFont("s9 c000000", "Segoe UI")
-        guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-        btnNext := guidedWizGui.Add("Button", "x15 y155 w100 h28", "Next →")
+        btnNext := DarkBtn(guidedWizGui, "x15 y155 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
         btnNext.OnEvent("Click", GuidedActionStepNext)
-        guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-        btnCancel := guidedWizGui.Add("Button", "x120 y155 w100 h28", "Cancel")
+        btnCancel := DarkBtn(guidedWizGui, "x120 y155 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     } else {
-        guidedWizGui.Add("Text", "x15 y45 w320", "Take: transfer items from grid slots (click + T).")
-        guidedWizGui.Add("Text", "x15 y65 w320", "Popcorn: drop items from grid slots (drop key).")
+        guidedWizGui.Add("Text", "x15 y45 w320", "Popcorn: drop items from grid slots (drop key).")
+        guidedWizGui.Add("Text", "x15 y65 w320", "Take: transfer items from grid slots (click + T).")
         guidedWizGui.Add("Text", "x15 y85 w320", "Record: manually record clicks & keys.")
-        global guidedActionDDL := guidedWizGui.Add("DropDownList", "x15 y115 w200", ["Take", "Popcorn", "Record"])
+        global guidedActionDDL := guidedWizGui.Add("DropDownList", "x15 y115 w200", ["Popcorn", "Take", "Record"])
         guidedActionDDL.Value := 1
         guidedActionDDL.SetFont("s9 c000000", "Segoe UI")
-        guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-        btnNext := guidedWizGui.Add("Button", "x15 y155 w100 h28", "Next →")
+        btnNext := DarkBtn(guidedWizGui, "x15 y155 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
         btnNext.OnEvent("Click", GuidedActionStepNext)
-        guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-        btnCancel := guidedWizGui.Add("Button", "x120 y155 w100 h28", "Cancel")
+        btnCancel := DarkBtn(guidedWizGui, "x120 y155 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     }
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedActionStepNext(*) {
@@ -6085,8 +6605,8 @@ GuidedActionStepNext(*) {
     if (guidedInvType = "player")
         actionMap := Map(1, "give", 2, "popcorn", 3, "record")
     else
-        actionMap := Map(1, "take", 2, "popcorn", 3, "record")
-    global guidedActionType := actionMap.Has(guidedActionDDL.Value) ? actionMap[guidedActionDDL.Value] : "take"
+        actionMap := Map(1, "popcorn", 2, "take", 3, "record")
+    global guidedActionType := actionMap.Has(guidedActionDDL.Value) ? actionMap[guidedActionDDL.Value] : "popcorn"
     if (guidedActionType = "popcorn") {
         guidedWizGui.Destroy()
         global guidedWizGui := ""
@@ -6125,14 +6645,12 @@ GuidedShowDropKeyPrompt(nextAction) {
     global guidedDropKeyEdit := guidedWizGui.Add("Edit", "x100 y95 w60 h24 Center", pcDropKey)
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     guidedWizGui.Add("Text", "x165 y99 w130", "default: g")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnOk := guidedWizGui.Add("Button", "x15 y130 w100 h28", "Confirm")
+    btnOk := DarkBtn(guidedWizGui, "x15 y130 w100 h28", "Confirm", _RED_BGR, _DK_BG, -12, true)
     btnOk.OnEvent("Click", GuidedDropKeyConfirm.Bind(nextAction))
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y130 w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y130 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedDropKeyConfirm(nextAction, *) {
@@ -6151,7 +6669,7 @@ GuidedDropKeyConfirm(nextAction, *) {
     if (nextAction = "popcorn")
         GuidedShowPopcornStep()
     else if (nextAction = "combo")
-        ComboShowStep1()
+        ComboShowSinglePage()
 }
 
 GuidedShowTakeStep() {
@@ -6179,14 +6697,12 @@ GuidedShowTakeStep() {
     guidedWizGui.Add("Text", "x15 y148 w55 h24 +0x200", "Name:")
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedTakeNameEdit := guidedWizGui.Add("Edit", "x75 y148 w205 h24", "")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := guidedWizGui.Add("Button", "x15 y182 w100 h28", "Save")
+    btnSave := DarkBtn(guidedWizGui, "x15 y182 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", GuidedTakeSave)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y182 w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y182 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedTakeSave(*) {
@@ -6202,7 +6718,7 @@ GuidedTakeSave(*) {
     }
     slotCount := Integer(guidedTakeEdit.Value)
     if (slotCount < 1)
-        slotCount := 1
+        slotCount := pcColumns * 6
     transferKey := "t"
     filter := Trim(guidedTakeFilterEdit.Value)
 
@@ -6243,6 +6759,9 @@ GuidedTakeSave(*) {
     m.invLoadDelay := 1500
     m.turbo := 1
     m.turboDelay := 1
+    m.guidedAction := "take"
+    m.guidedKey := transferKey
+    m.guidedCount := slotCount
     m.searchFilters := []
     if (filter != "")
         m.searchFilters.Push(filter)
@@ -6286,14 +6805,12 @@ GuidedShowGiveStep() {
     guidedWizGui.Add("Text", "x15 y170 w55 h24 +0x200", "Name:")
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedGiveNameEdit := guidedWizGui.Add("Edit", "x75 y170 w205 h24", "")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := guidedWizGui.Add("Button", "x15 y204 w100 h28", "Save")
+    btnSave := DarkBtn(guidedWizGui, "x15 y204 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", GuidedGiveSave)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y204 w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y204 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedGiveSave(*) {
@@ -6309,7 +6826,7 @@ GuidedGiveSave(*) {
     }
     slotCount := Integer(guidedGiveEdit.Value)
     if (slotCount < 1)
-        slotCount := 1
+        slotCount := pcColumns * 6
     transferKey := "t"
     filter := Trim(guidedGiveFilterEdit.Value)
     hasFilter := (filter != "")
@@ -6356,6 +6873,9 @@ GuidedGiveSave(*) {
     m.turbo := 1
     m.turboDelay := 1
     m.playerSearch := true
+    m.guidedAction := "give"
+    m.guidedKey := transferKey
+    m.guidedCount := slotCount
     m.searchFilters := []
     if (filter != "")
         m.searchFilters.Push(filter)
@@ -6402,14 +6922,12 @@ GuidedShowPopcornStep() {
     guidedWizGui.Add("Text", "x15 y178 w55 h24 +0x200", "Name:")
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedPcNameEdit := guidedWizGui.Add("Edit", "x75 y178 w205 h24", "")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := guidedWizGui.Add("Button", "x15 y212 w100 h28", "Save")
+    btnSave := DarkBtn(guidedWizGui, "x15 y212 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", GuidedPopcornSave)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y212 w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y212 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedPopcornSave(*) {
@@ -6423,9 +6941,7 @@ GuidedPopcornSave(*) {
         SetTimer(() => ToolTip(), -1500)
         return
     }
-    slotCount := Integer(guidedPcSlotsEdit.Value)
-    if (slotCount < 1)
-        slotCount := 1
+    rawCount := Integer(guidedPcSlotsEdit.Value)
     dropKey := Trim(guidedPcDropKeyEdit.Value)
     if (dropKey = "")
         dropKey := "g"
@@ -6433,27 +6949,29 @@ GuidedPopcornSave(*) {
     try IniWrite(pcDropKey, A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey")
     filter := Trim(guidedPcFilterEdit.Value)
 
-    gridSize := pcColumns * 6
     events := []
-    remaining := slotCount
-    while (remaining > 0) {
-        slot := 0
-        Loop 6 {
-            row := A_Index - 1
-            Loop pcColumns {
-                col := A_Index - 1
-                slot++
+    if (rawCount > 0) {
+        gridSize := pcColumns * 6
+        remaining := rawCount
+        while (remaining > 0) {
+            slot := 0
+            Loop 6 {
+                row := A_Index - 1
+                Loop pcColumns {
+                    col := A_Index - 1
+                    slot++
+                    if (slot > remaining || slot > gridSize)
+                        break
+                    x := pcStartSlotX + col * pcSlotW
+                    y := pcStartSlotY + row * pcSlotH
+                    events.Push({type: "M", x: x, y: y, delay: 0})
+                    events.Push({type: "K", dir: "p", key: dropKey, delay: 20})
+                }
                 if (slot > remaining || slot > gridSize)
                     break
-                x := pcStartSlotX + col * pcSlotW
-                y := pcStartSlotY + row * pcSlotH
-                events.Push({type: "M", x: x, y: y, delay: 0})
-                events.Push({type: "K", dir: "p", key: dropKey, delay: 20})
             }
-            if (slot > remaining || slot > gridSize)
-                break
+            remaining -= Min(slot, gridSize)
         }
-        remaining -= Min(slot, gridSize)
     }
 
     m := {}
@@ -6468,6 +6986,10 @@ GuidedPopcornSave(*) {
     m.invLoadDelay := 1500
     m.turbo := 1
     m.turboDelay := 1
+    m.popcornAll := (rawCount = 0) ? 1 : 0
+    m.guidedAction := "popcorn"
+    m.guidedKey := dropKey
+    m.guidedCount := rawCount
     m.searchFilters := []
     if (filter != "")
         m.searchFilters.Push(filter)
@@ -6479,8 +7001,8 @@ GuidedPopcornSave(*) {
     try guidedWizGui.Destroy()
     global guidedWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
-    MacroLog("GuidedPopcornSave: '" name "' — " slotCount " slots, dropKey=" dropKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
-    ToolTip(" Popcorn macro '" name "' saved! (" slotCount " slots, " events.Length " events)", 0, 0)
+    MacroLog("GuidedPopcornSave: '" name "' — " rawCount " slots, dropKey=" dropKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
+    ToolTip(" Popcorn macro '" name "' saved! (" rawCount " slots, " events.Length " events)", 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
 
@@ -6495,14 +7017,12 @@ GuidedShowStep2() {
     guidedWizGui.Add("Text", "x15 y65 w320", "Enter 0 for no search filter (raw recording).")
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedCountEdit := guidedWizGui.Add("Edit", "x15 y95 w60 h24 +Number", "1")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := guidedWizGui.Add("Button", "x15 y135 w100 h28", "Next →")
+    btnNext := DarkBtn(guidedWizGui, "x15 y135 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", GuidedStep2Next)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := guidedWizGui.Add("Button", "x120 y135 w100 h28", "← Back")
+    btnBack := DarkBtn(guidedWizGui, "x120 y135 w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", GuidedStep2Back)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedStep2Back(*) {
@@ -6549,14 +7069,12 @@ GuidedShowStep3() {
         guidedFilterEdits.Push(ed)
         yPos += 30
     }
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := guidedWizGui.Add("Button", "x15 y" yPos " w100 h28", "Next →")
+    btnNext := DarkBtn(guidedWizGui, "x15 y" yPos " w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", GuidedStep3Next)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := guidedWizGui.Add("Button", "x120 y" yPos " w100 h28", "← Back")
+    btnBack := DarkBtn(guidedWizGui, "x120 y" yPos " w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", GuidedStep3Back)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedStep3Back(*) {
@@ -6600,14 +7118,12 @@ GuidedShowStep4() {
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y135 w340", "We auto-strip the F open/close and mouse travel.")
     guidedWizGui.Add("Text", "x15 y150 w340", "Just record slot clicks and key presses inside inv.")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnStart := guidedWizGui.Add("Button", "x15 y178 w120 h28", "Start Recording")
+    btnStart := DarkBtn(guidedWizGui, "x15 y178 w120 h28", "Start Recording", _RED_BGR, _DK_BG, -12, true)
     btnStart.OnEvent("Click", GuidedBeginRecord)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := guidedWizGui.Add("Button", "x140 y178 w100 h28", "← Back")
+    btnBack := DarkBtn(guidedWizGui, "x140 y178 w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", GuidedStep4Back)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedStep4Back(*) {
@@ -6885,14 +7401,12 @@ GuidedShowSaveDialog() {
     global guidedLoadEdit := guidedWizGui.Add("Edit", "x125 y170 w50 h24 +Number", "1500")
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     guidedWizGui.Add("Text", "x180 y174 w130", "wait for slots to populate")
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := guidedWizGui.Add("Button", "x15 y202 w100 h28", "Save")
+    btnSave := DarkBtn(guidedWizGui, "x15 y202 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", GuidedDoSave)
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnDiscard := guidedWizGui.Add("Button", "x120 y202 w100 h28", "Discard")
+    btnDiscard := DarkBtn(guidedWizGui, "x120 y202 w100 h28", "Discard", 0xDDDDDD, _DK_BG, -12, false)
     btnDiscard.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedCleanRecordedEvents() {
@@ -7144,16 +7658,22 @@ GuidedPlayThread(m) {
             } else {
             }
 
-            turboOn := m.HasProp("turbo") && m.turbo
-            modeLabel := guidedSingleItem ? "SINGLE" : (turboOn ? "FAST" : "FULL")
-            MacroLog("GuidedPlay: replaying (" modeLabel ") " m.events.Length " events")
-            if (guidedSingleItem)
-                GuidedReplaySingle(m, mouseSpd)
-            else if (turboOn)
-                GuidedReplayFastTransfer(m, mouseSpd)
-            else
-                GuidedReplayEvents(m, mouseSpd)
-            MacroLog("GuidedPlay: replay done")
+            if (m.HasProp("popcornAll") && m.popcornAll && m.events.Length = 0) {
+                MacroLog("GuidedPlay: popcornAll — running drop loop")
+                GuidedPopcornAllLoop()
+                MacroLog("GuidedPlay: popcornAll drop loop done")
+            } else {
+                turboOn := m.HasProp("turbo") && m.turbo
+                modeLabel := guidedSingleItem ? "SINGLE" : (turboOn ? "FAST" : "FULL")
+                MacroLog("GuidedPlay: replaying (" modeLabel ") " m.events.Length " events")
+                if (guidedSingleItem)
+                    GuidedReplaySingle(m, mouseSpd)
+                else if (turboOn)
+                    GuidedReplayFastTransfer(m, mouseSpd)
+                else
+                    GuidedReplayEvents(m, mouseSpd)
+                MacroLog("GuidedPlay: replay done")
+            }
 
             if (macroPlaying) {
                 MacroLog("GuidedPlay: closing inventory")
@@ -7296,6 +7816,69 @@ GuidedApplySearchFilter(filter, usePlayerBar := false) {
     MacroLog("GuidedApplyFilter: [" filter "] applied")
 }
 
+RebuildGuidedEvents(action, count, key) {
+    global pcStartSlotX, pcStartSlotY, pcSlotW, pcSlotH, pcColumns
+    global plStartSlotX, plStartSlotY, plSlotW, plSlotH
+    if (action = "give") {
+        startX := plStartSlotX
+        startY := plStartSlotY
+        slotW := plSlotW
+        slotH := plSlotH
+        cols := 6
+    } else {
+        startX := pcStartSlotX
+        startY := pcStartSlotY
+        slotW := pcSlotW
+        slotH := pcSlotH
+        cols := pcColumns
+    }
+    gridSize := cols * 6
+    events := []
+    if (count <= 0)
+        return events
+    remaining := count
+    while (remaining > 0) {
+        slot := 0
+        clicked := 0
+        Loop 6 {
+            row := A_Index - 1
+            Loop cols {
+                col := A_Index - 1
+                slot++
+                if (slot > remaining || slot > gridSize)
+                    break
+                x := startX + col * slotW
+                y := startY + row * slotH
+                if (action = "take" || action = "give") {
+                    if (events.Length > 0)
+                        events.Push({type: "M", x: x, y: y, delay: 0})
+                    events.Push({type: "C", dir: "c", btn: "L", x: x, y: y, delay: 100})
+                    events.Push({type: "K", dir: "p", key: key, delay: 60})
+                } else {
+                    events.Push({type: "M", x: x, y: y, delay: 0})
+                    events.Push({type: "K", dir: "p", key: key, delay: 20})
+                }
+                clicked++
+            }
+            if (slot > remaining || slot > gridSize)
+                break
+        }
+        remaining -= Min(clicked, gridSize)
+    }
+    return events
+}
+
+GuidedPopcornAllLoop() {
+    global macroPlaying, pcStartSlotX, pcStartSlotY, pcSlotW, pcSlotH
+    global pcColumns, pcRows, pcDropKey, pcDropSleep, pcHoverDelay, pcCycleSleep
+    global pcEarlyExit, pcF1Abort
+    CoordMode("Mouse", "Screen")
+    global pcEarlyExit := false
+    global pcF1Abort := false
+    PcRunDropLoop("guided-pc", 0)
+    MacroLog("GuidedPopcornAll: drop loop done")
+}
+
 GuidedReplayFastTransfer(m, mouseSpd) {
     global macroPlaying, pcDropSleep, pcHoverDelay, pcColumns
     CoordMode("Mouse", "Screen")
@@ -7359,9 +7942,7 @@ GuidedReplayFastTransfer(m, mouseSpd) {
             Sleep(30)
             if (!macroPlaying)
                 return
-            kName := StrLen(transferKey) > 1 ? "{" transferKey "}" : transferKey
-            Send(kName)
-            MacroLog("GuidedFastXfer: [" i "] click+" transferKey " (" slot.x "," slot.y ")")
+            Send("{" transferKey "}")
             if (i < dropSlots.Length)
                 Sleep(50)
         }
@@ -7520,10 +8101,130 @@ ComboStartWizard(*) {
     savedDrop := ""
     try savedDrop := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
     if (savedDrop != "") {
-        ComboShowStep1()
+        ComboShowSinglePage()
     } else {
         GuidedShowDropKeyPrompt("combo")
     }
+}
+
+ComboShowSinglePage() {
+    global comboWizGui, comboPopcornFilters, comboMagicFFilters
+    global comboTakeCount, comboTakeFilter
+    try {
+        if (comboWizGui != "")
+            comboWizGui.Destroy()
+    }
+    comboWizGui := Gui("+AlwaysOnTop", "Link: Popcorn + Magic F")
+    comboWizGui.BackColor := "1A1A1A"
+    y := 16
+    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.Add("Text", "x16 y" y " w250", "Link: Popcorn + Magic F")
+    cHelpBtn := DarkBtn(comboWizGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
+    cHelpBtn.OnEvent("Click", ComboShowSinglePageHelp)
+    y += 34
+    comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    comboWizGui.Add("Text", "x16 y" y " w120 h24 +0x200", "Popcorn filters:")
+    comboWizGui.SetFont("s9 c000000", "Segoe UI")
+    global comboSpPcEdit := comboWizGui.Add("Edit", "x140 y" y " w190 h24", "")
+    y += 26
+    comboWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
+    comboWizGui.Add("Text", "x140 y" y " w190", "comma-separated (empty = all)")
+    y += 20
+    comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    comboWizGui.Add("Text", "x16 y" y " w120 h24 +0x200", "Magic F filters:")
+    comboWizGui.SetFont("s9 c000000", "Segoe UI")
+    global comboSpMfEdit := comboWizGui.Add("Edit", "x140 y" y " w190 h24", "")
+    y += 26
+    comboWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
+    comboWizGui.Add("Text", "x140 y" y " w190", "comma-separated")
+    y += 26
+    comboWizGui.Add("Progress", "x16 y" y " w318 h1 Background333333")
+    y += 10
+    comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    comboWizGui.Add("Text", "x16 y" y " w55 h24 +0x200", "Name:")
+    comboWizGui.SetFont("s9 c000000", "Segoe UI")
+    global comboSpNameEdit := comboWizGui.Add("Edit", "x140 y" y " w190 h24", "PC+MF")
+    y += 28
+    saveBtn := DarkBtn(comboWizGui, "x16 y" y " w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
+    saveBtn.OnEvent("Click", ComboSpSave)
+    cancelBtn := DarkBtn(comboWizGui, "x200 y" y " w100 h26", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
+    cancelBtn.OnEvent("Click", ComboCancel)
+    comboWizGui.OnEvent("Close", ComboCancel)
+    comboWizGui.Show("w350 h" (y + 36) " " MacroPopupPos(350))
+}
+
+ComboShowSinglePageHelp(*) {
+    static hGui := ""
+    if IsObject(hGui) {
+        try hGui.Destroy()
+        hGui := ""
+        return
+    }
+    hGui := Gui("+AlwaysOnTop +ToolWindow", "Combo Help")
+    hGui.BackColor := "1A1A1A"
+    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.Add("Text", "x10 y8 w280", "POPCORN + MAGIC F")
+    hGui.SetFont("s8 cDDDDDD", "Segoe UI")
+    hGui.Add("Text", "x10 y30 w280",
+        "Two-phase macro: Popcorn then Magic F.`n`n"
+        "Popcorn: F at inventory → drops items.`n"
+        "Magic F: F at trough → filter + give.`n"
+        "Q swaps between phases. Z exits.`n`n"
+        "Use multiple filters separated by commas.`n"
+        "Leave Popcorn empty to drop all items.`n"
+        "Each filter runs one full grid pass.")
+    hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
+    hGui.Show("w300 h200 " MacroPopupPos(300))
+}
+
+ComboSpSave(*) {
+    global comboWizGui, comboSpPcEdit, comboSpMfEdit, comboSpNameEdit
+    global comboPopcornFilters, comboMagicFFilters, comboTakeCount, comboTakeFilter
+    global macroList, macroTabActive, macroSelectedIdx
+
+    name := Trim(comboSpNameEdit.Value)
+    if (name = "") {
+        ToolTip("Enter a name!")
+        SetTimer(() => ToolTip(), -1500)
+        return
+    }
+
+    pcRaw := comboSpPcEdit.Value
+    pcFilters := []
+    for , part in StrSplit(pcRaw, ",") {
+        v := Trim(part)
+        if (v != "")
+            pcFilters.Push(v)
+    }
+    if (pcFilters.Length = 0)
+        pcFilters.Push("")
+
+    mfRaw := comboSpMfEdit.Value
+    mfFilters := []
+    for , part in StrSplit(mfRaw, ",") {
+        v := Trim(part)
+        if (v != "")
+            mfFilters.Push(v)
+    }
+
+    m := {}
+    m.name := name
+    m.type := "combo"
+    m.hotkey := ""
+    m.popcornFilters := pcFilters
+    m.magicFFilters := mfFilters
+    m.takeCount := 0
+    m.takeFilter := ""
+
+    macroList.Push(m)
+    global macroSelectedIdx := macroList.Length
+    MacroSaveAll()
+    MacroUpdateListView()
+    try comboWizGui.Destroy()
+    global comboWizGui := ""
+    MacroRegisterHotkeys(macroTabActive)
+    ToolTip(" Combo '" name "' saved! (P:" pcFilters.Length " M:" mfFilters.Length ")", 0, 0)
+    SetTimer(() => ToolTip(), -3000)
 }
 
 ComboShowStep1() {
@@ -7542,14 +8243,12 @@ ComboShowStep1() {
     comboWizGui.SetFont("s9 c000000", "Segoe UI")
     comboWizGui.Add("Text", "x15 y90 w80 h24 +0x200 cDDDDDD", "Count:")
     global comboPC_CountEdit := comboWizGui.Add("Edit", "x100 y90 w50 h24 +Number", "0")
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := comboWizGui.Add("Button", "x15 y125 w100 h28", "Next →")
+    btnNext := DarkBtn(comboWizGui, "x15 y125 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", ComboStep1Next)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := comboWizGui.Add("Button", "x120 y125 w100 h28", "Cancel")
+    btnCancel := DarkBtn(comboWizGui, "x120 y125 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", ComboCancel)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboStep1Next(*) {
@@ -7584,14 +8283,12 @@ ComboShowStep2(pcCount) {
         comboPcEdits.Push(ed)
         yPos += 30
     }
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := comboWizGui.Add("Button", "x15 y" yPos " w100 h28", "Next →")
+    btnNext := DarkBtn(comboWizGui, "x15 y" yPos " w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", ComboStep2Next)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := comboWizGui.Add("Button", "x120 y" yPos " w100 h28", "← Back")
+    btnBack := DarkBtn(comboWizGui, "x120 y" yPos " w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", ComboStep2Back)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboStep2Back(*) {
@@ -7626,14 +8323,12 @@ ComboShowStep3() {
     comboWizGui.SetFont("s9 c000000", "Segoe UI")
     comboWizGui.Add("Text", "x15 y68 w80 h24 +0x200 cDDDDDD", "Count:")
     global comboMF_CountEdit := comboWizGui.Add("Edit", "x100 y68 w50 h24 +Number", "1")
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := comboWizGui.Add("Button", "x15 y105 w100 h28", "Next →")
+    btnNext := DarkBtn(comboWizGui, "x15 y105 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", ComboStep3Next)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := comboWizGui.Add("Button", "x120 y105 w100 h28", "← Back")
+    btnBack := DarkBtn(comboWizGui, "x120 y105 w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", ComboStep3Back)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboStep3Back(*) {
@@ -7673,14 +8368,12 @@ ComboShowStep4(mfCount) {
         comboMfEdits.Push(ed)
         yPos += 30
     }
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := comboWizGui.Add("Button", "x15 y" yPos " w100 h28", "Next →")
+    btnNext := DarkBtn(comboWizGui, "x15 y" yPos " w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", ComboStep4Next)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := comboWizGui.Add("Button", "x120 y" yPos " w100 h28", "← Back")
+    btnBack := DarkBtn(comboWizGui, "x120 y" yPos " w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", ComboStep4Back)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboStep4Back(*) {
@@ -7730,14 +8423,12 @@ ComboShowStep5() {
     global comboTakeFilterEdit := comboWizGui.Add("Edit", "x120 y120 w200 h24", "")
     comboWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     comboWizGui.Add("Text", "x15 y148 w320", "Blank = take from first slots. Filter = search then take.")
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnNext := comboWizGui.Add("Button", "x15 y175 w100 h28", "Next →")
+    btnNext := DarkBtn(comboWizGui, "x15 y175 w100 h28", "Next →", _RED_BGR, _DK_BG, -12, true)
     btnNext.OnEvent("Click", ComboStep5Next)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnBack := comboWizGui.Add("Button", "x120 y175 w100 h28", "← Back")
+    btnBack := DarkBtn(comboWizGui, "x120 y175 w100 h28", "← Back", 0xDDDDDD, _DK_BG, -12, false)
     btnBack.OnEvent("Click", ComboStep5Back)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboStep5Back(*) {
@@ -7785,17 +8476,14 @@ ComboShowSaveDialog() {
     comboWizGui.Add("Text", "x15 y112 w55 h24 +0x200", "Hotkey:")
     comboWizGui.SetFont("s9 c000000", "Segoe UI")
     global comboHkEdit := comboWizGui.Add("Edit", "x75 y112 w100 h24 ReadOnly", "")
-    comboWizGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    comboHkDetect := comboWizGui.Add("Button", "x180 y112 w75 h24", "Detect")
+    comboHkDetect := DarkBtn(comboWizGui, "x180 y112 w75 h24", "Detect", _RED_BGR, _DK_BG, -11, true)
     comboHkDetect.OnEvent("Click", ComboDetectHotkey)
-    comboWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := comboWizGui.Add("Button", "x15 y148 w100 h28", "Save")
+    btnSave := DarkBtn(comboWizGui, "x15 y148 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", ComboDoSave)
-    comboWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnDiscard := comboWizGui.Add("Button", "x120 y148 w100 h28", "Cancel")
+    btnDiscard := DarkBtn(comboWizGui, "x120 y148 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnDiscard.OnEvent("Click", ComboCancel)
     comboWizGui.OnEvent("Close", ComboCancel)
-    comboWizGui.Show("AutoSize")
+    comboWizGui.Show("AutoSize " MacroPopupPos(380))
 }
 
 ComboDetectHotkey(*) {
@@ -7927,17 +8615,11 @@ ComboPlayThread(m) {
                         Send("{Escape}")
                         Sleep(300)
                     }
-                    if (comboFilterIdx < pcFilters.Length) {
-                        global comboFilterIdx := comboFilterIdx + 1
-                        MacroLog("ComboPlay: Q → next popcorn filter #" comboFilterIdx)
-                        ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                    } else {
-                        global comboMode := 2
-                        global comboFilterIdx := 1
-                        MacroLog("ComboPlay: Q → swapped to MAGIC F (armed)")
-                        ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                        break
-                    }
+                    global comboMode := 2
+                    global comboFilterIdx := 1
+                    MacroLog("ComboPlay: Q → swapped to MAGIC F")
+                    ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    break
                 }
                 if (GetKeyState("r", "P")) {
                     while (GetKeyState("r", "P") && macroPlaying)
@@ -8010,16 +8692,19 @@ ComboPlayThread(m) {
                 if (GetKeyState("q", "P")) {
                     while (GetKeyState("q", "P") && macroPlaying)
                         Sleep(50)
-                    if (comboFilterIdx < mfFilters.Length) {
-                        global comboFilterIdx := comboFilterIdx + 1
-                        MacroLog("ComboPlay: Q → next MF filter #" comboFilterIdx)
+                    global comboMode := 1
+                    global comboFilterIdx := 1
+                    MacroLog("ComboPlay: Q → swapped to POPCORN")
+                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    break
+                }
+                if (GetKeyState("r", "P")) {
+                    while (GetKeyState("r", "P") && macroPlaying)
+                        Sleep(50)
+                    if (mfFilters.Length > 1) {
+                        global comboFilterIdx := comboFilterIdx >= mfFilters.Length ? 1 : comboFilterIdx + 1
+                        MacroLog("ComboPlay: R → MF filter #" comboFilterIdx)
                         ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                    } else {
-                        global comboMode := 1
-                        global comboFilterIdx := 1
-                        MacroLog("ComboPlay: Q → swapped to POPCORN (armed)")
-                        ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                        break
                     }
                 }
                 if (GetKeyState("z", "P")) {
@@ -8051,7 +8736,7 @@ ComboPlayThread(m) {
                         ToolTip(" Inventory not detected — try again`n" ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     } else {
                         curFilter := mfFilters[comboFilterIdx]
-                        MacroLog("ComboPlay: MF inv found — filter [" (curFilter = "" ? "(all)" : curFilter) "] → Transfer All")
+                        MacroLog("ComboPlay: MF filter #" comboFilterIdx " [" (curFilter = "" ? "(all)" : curFilter) "] → Transfer All")
                         ComboApplyMyFilter(curFilter)
                         ComboMagicFGive()
                         MacroLog("ComboPlay: MF give done — closing inv")
@@ -8091,7 +8776,7 @@ ComboWaitForInv(maxMs := 3000) {
 }
 
 ComboApplyTheirFilter(filter) {
-    global arkwindow, theirInvSearchBarX, theirInvSearchBarY
+    global arkwindow, theirInvSearchBarX, theirInvSearchBarY, pcStartSlotX, pcStartSlotY
     if (filter = "" || !WinExist(arkwindow))
         return
     WinActivate(arkwindow)
@@ -8105,6 +8790,8 @@ ComboApplyTheirFilter(filter) {
     SendInput("^v")
     Sleep(250)
     A_Clipboard := _savedClip
+    ControlClick("x" pcStartSlotX " y" pcStartSlotY, arkwindow,,,,"NA")
+    Sleep(200)
 }
 
 ComboApplyMyFilter(filter) {
@@ -8123,65 +8810,99 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
     global pcDropSleep, pcHoverDelay
     if (!macroPlaying || !comboRunning || !WinExist(arkwindow))
         return
-    ToolTip(ComboBuildTooltip(m, "dropping", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-    MacroLog("ComboPlay: drop grid started  rows=" pcRows " cols=" pcColumns " dropKey=" pcDropKey " dropSleep=" pcDropSleep)
-    passNum := 0
-    ocrFails := 0
-    while (macroPlaying && comboRunning) {
-        passNum++
-        Loop pcRows {
-            row := A_Index - 1
-            Loop pcColumns {
-                col := A_Index - 1
-                if (!macroPlaying || !comboRunning)
-                    return
-                if (GetKeyState("r", "P")) {
-                    while (GetKeyState("r", "P") && macroPlaying)
-                        Sleep(50)
-                    MacroLog("ComboPlay: R → closing inv from drop grid (pass " passNum ")")
-                    Send("{Escape}")
-                    Sleep(300)
-                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                    return
-                }
-                if (!WinActive(arkwindow))
-                    continue
-                x := pcStartSlotX + col * pcSlotW
-                y := pcStartSlotY + row * pcSlotH
-                DllCall("SetCursorPos", "int", x, "int", y)
-                if (row = 0)
-                    Sleep(pcHoverDelay)
-                PcFastKey(pcDropKey)
-                if (pcDropSleep > 0)
-                    Sleep(pcDropSleep)
-            }
-        }
-        MacroLog("ComboPlay: drop grid pass " passNum " done")
-        if (passNum >= 2) {
-            chk := PcCheckStorageEmpty()
-            MacroLog("ComboPlay: drop pass " passNum " OCR=" chk)
-            if (chk = 0) {
-                MacroLog("ComboPlay: storage empty after pass " passNum " — done")
-                Send("{Escape}")
-                Sleep(300)
-                ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                return
-            }
-            if (chk = -1) {
-                ocrFails++
-                if (ocrFails >= 6) {
-                    MacroLog("ComboPlay: 6 OCR fails — assuming empty")
-                    Send("{Escape}")
-                    Sleep(300)
-                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
-                    return
-                }
+    startIdx := comboFilterIdx
+    Loop pcFilters.Length {
+        fi := startIdx + A_Index - 1
+        if (fi > pcFilters.Length)
+            break
+        if (!macroPlaying || !comboRunning)
+            return
+        global comboFilterIdx := fi
+        curFilter := pcFilters[fi]
+        if (fi > startIdx) {
+            if (curFilter != "") {
+                MacroLog("ComboPlay: auto-cycling to filter #" fi " [" curFilter "]")
+                ComboApplyTheirFilter(curFilter)
             } else {
-                ocrFails := 0
+                MacroLog("ComboPlay: auto-cycling to filter #" fi " (all)")
+                PcClearFilter()
             }
         }
-        Sleep(5)
+        ToolTip(ComboBuildTooltip(m, "dropping", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+        MacroLog("ComboPlay: drop grid filter #" fi " rows=" pcRows " cols=" pcColumns)
+        passNum := 0
+        ocrFails := 0
+        stallCount := 0
+        lastStorage := -99
+        filterDone := false
+        while (macroPlaying && comboRunning) {
+            passNum++
+            Loop pcRows {
+                row := A_Index - 1
+                Loop pcColumns {
+                    col := A_Index - 1
+                    if (!macroPlaying || !comboRunning)
+                        return
+                    if (GetKeyState("r", "P")) {
+                        while (GetKeyState("r", "P") && macroPlaying)
+                            Sleep(50)
+                        MacroLog("ComboPlay: R → closing inv from drop grid (pass " passNum ")")
+                        Send("{Escape}")
+                        Sleep(300)
+                        ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        return
+                    }
+                    if (!WinActive(arkwindow))
+                        continue
+                    x := pcStartSlotX + col * pcSlotW
+                    y := pcStartSlotY + row * pcSlotH
+                    DllCall("SetCursorPos", "int", x, "int", y)
+                    if (row = 0)
+                        Sleep(pcHoverDelay)
+                    PcFastKey(pcDropKey)
+                    if (pcDropSleep > 0)
+                        Sleep(pcDropSleep)
+                }
+            }
+            MacroLog("ComboPlay: drop grid pass " passNum " done (filter #" fi ")")
+            if (passNum >= 2) {
+                chk := PcCheckStorageEmpty()
+                MacroLog("ComboPlay: drop pass " passNum " OCR=" chk)
+                if (chk = 0) {
+                    MacroLog("ComboPlay: storage empty after pass " passNum " — filter #" fi " done")
+                    filterDone := true
+                    break
+                }
+                if (chk = -1) {
+                    ocrFails++
+                    if (ocrFails >= 6) {
+                        MacroLog("ComboPlay: 6 OCR fails — assuming filter #" fi " done")
+                        filterDone := true
+                        break
+                    }
+                } else {
+                    ocrFails := 0
+                    if (chk = lastStorage) {
+                        stallCount++
+                        if (stallCount >= 3) {
+                            MacroLog("ComboPlay: stalled at " chk " for 3 passes — filter #" fi " done or drop cap")
+                            filterDone := true
+                            break
+                        }
+                    } else {
+                        lastStorage := chk
+                        stallCount := 0
+                    }
+                }
+            }
+            Sleep(5)
+        }
+        if (!filterDone)
+            break
     }
+    Send("{Escape}")
+    Sleep(300)
+    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
 }
 
 ComboMagicFGive() {
@@ -8205,8 +8926,7 @@ ComboBuildTooltip(m, phase, idx, pcFilters, mfFilters) {
                 tt .= (i = idx ? "►" label "◄" : label) (i < pcFilters.Length ? " → " : "")
             }
         }
-        qHint := (idx >= pcFilters.Length) ? "Q = → Magic F" : "Q = next filter"
-        tt .= "`n`n F = open inv & drop  |  " qHint
+        tt .= "`n`n F = open inv & drop  |  Q = → Magic F"
         tt .= "`n R = close inv  |  Z = exit combo  |  F1 = Stop"
     } else if (phase = "dropping") {
         cur := idx <= pcFilters.Length ? (pcFilters[idx] = "" ? "(all)" : pcFilters[idx]) : "?"
@@ -8222,9 +8942,9 @@ ComboBuildTooltip(m, phase, idx, pcFilters, mfFilters) {
                 tt .= (i = idx ? "►" label "◄" : label) (i < mfFilters.Length ? " → " : "")
             }
         }
-        qHint := (idx >= mfFilters.Length) ? "Q = → Popcorn" : "Q = next filter"
         tt .= "`n`n F = open inv & give (auto-close)"
-        tt .= "`n " qHint "  |  Z = exit combo  |  F1 = Stop"
+        rHint := mfFilters.Length > 1 ? "  |  R = next filter" : ""
+        tt .= "`n Q = → Popcorn" rHint "  |  Z = exit  |  F1 = Stop"
     }
     return tt
 }
@@ -8282,19 +9002,16 @@ GuidedShowEditDialog(idx) {
     global geLoadEdit := macroEditGui.Add("Edit", "x125 y170 w50 h24 +Number", String(m.HasProp("invLoadDelay") ? m.invLoadDelay : 1500))
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
     macroEditGui.Add("Text", "x180 y174 w130", "wait for slots to populate")
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    geRerecordBtn := macroEditGui.Add("Button", "x15 y202 w140 h28", "Re-record Actions")
+    geRerecordBtn := DarkBtn(macroEditGui, "x15 y202 w140 h28", "Re-record Actions", _RED_BGR, _DK_BG, -12, true)
     geRerecordBtn.OnEvent("Click", GuidedReRecord.Bind(idx))
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
     macroEditGui.Add("Text", "x160 y208 w150", "keeps settings, new recording")
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    geSaveBtn := macroEditGui.Add("Button", "x15 y238 w100 h28", "Save")
+    geSaveBtn := DarkBtn(macroEditGui, "x15 y238 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     geSaveBtn.OnEvent("Click", GuidedEditSave.Bind(idx))
-    macroEditGui.SetFont("s9 c888888", "Segoe UI")
-    geCancelBtn := macroEditGui.Add("Button", "x120 y238 w100 h28", "Cancel")
+    geCancelBtn := DarkBtn(macroEditGui, "x120 y238 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     geCancelBtn.OnEvent("Click", (*) => GuidedEditClose())
     macroEditGui.OnEvent("Close", (*) => GuidedEditClose())
-    macroEditGui.Show("AutoSize")
+    macroEditGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedReRecord(idx, *) {
@@ -8430,14 +9147,12 @@ GuidedShowReRecordSetup(idx, mode, slotCount, dropKey, filter) {
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     guidedWizGui.Add("Text", "x275 y" (filterY + 4) " w40", "blank=all")
     btnY := filterY + 35
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave := guidedWizGui.Add("Button", "x15 y" btnY " w100 h28", "Save")
+    btnSave := DarkBtn(guidedWizGui, "x15 y" btnY " w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     btnSave.OnEvent("Click", GuidedReRecordSetupSave.Bind(idx, mode))
-    guidedWizGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := guidedWizGui.Add("Button", "x120 y" btnY " w100 h28", "Cancel")
+    btnCancel := DarkBtn(guidedWizGui, "x120 y" btnY " w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     btnCancel.OnEvent("Click", GuidedCancel)
     guidedWizGui.OnEvent("Close", GuidedCancel)
-    guidedWizGui.Show("AutoSize")
+    guidedWizGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 GuidedReRecordSetupSave(idx, mode, *) {
@@ -8647,8 +9362,7 @@ ComboShowEditDialog(idx) {
     macroEditGui.Add("Text", "x15 y70 w55 h24 +0x200", "Hotkey:")
     macroEditGui.SetFont("s9 c000000", "Segoe UI")
     global ceHkEdit := macroEditGui.Add("Edit", "x75 y70 w100 h24 ReadOnly", m.hotkey)
-    macroEditGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    ceHkDetect := macroEditGui.Add("Button", "x180 y70 w75 h24", "Detect")
+    ceHkDetect := DarkBtn(macroEditGui, "x180 y70 w75 h24", "Detect", _RED_BGR, _DK_BG, -11, true)
     ceHkDetect.OnEvent("Click", (*) => ComboEditDetectHk())
     macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
     macroEditGui.Add("Text", "x15 y102 w200", "Popcorn Filters:")
@@ -8672,14 +9386,12 @@ ComboShowEditDialog(idx) {
     global ceMfEdit := macroEditGui.Add("Edit", "x15 y188 w300 h24", mfStr)
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
     macroEditGui.Add("Text", "x15 y214 w300", "Separate with | (e.g. flak|riot)")
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    ceSaveBtn := macroEditGui.Add("Button", "x15 y240 w100 h28", "Save")
+    ceSaveBtn := DarkBtn(macroEditGui, "x15 y240 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     ceSaveBtn.OnEvent("Click", ComboEditSave.Bind(idx))
-    macroEditGui.SetFont("s9 c888888", "Segoe UI")
-    ceCancelBtn := macroEditGui.Add("Button", "x120 y240 w100 h28", "Cancel")
+    ceCancelBtn := DarkBtn(macroEditGui, "x120 y240 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     ceCancelBtn.OnEvent("Click", (*) => GuidedEditClose())
     macroEditGui.OnEvent("Close", (*) => GuidedEditClose())
-    macroEditGui.Show("AutoSize")
+    macroEditGui.Show("AutoSize " MacroPopupPos(350))
 }
 
 ComboEditDetectHk() {
@@ -12877,7 +13589,8 @@ PcCheckStorageEmpty() {
             cleaned := RegExReplace(sText, "[oO]", "0")
             cleaned := RegExReplace(cleaned, "[Il|]", "1")
             cleaned := RegExReplace(cleaned, "s(?=\d)", "5")
-            cleaned := RegExReplace(cleaned, "\d+\.\d+", "")
+            cleaned := RegExReplace(cleaned, "\d+\.\d+\s*/?\s*\d*\.?\d*", "")
+            cleaned := RegExReplace(cleaned, "\s+", " ")
             if RegExMatch(cleaned, "(-?\d+)\s*/\s*(\d+)", &sMatch) {
                 val := Integer(sMatch[1])
                 maxVal := Integer(sMatch[2])
@@ -12888,7 +13601,7 @@ PcCheckStorageEmpty() {
                     Sleep(80)
                     continue
                 }
-                if (maxVal >= 20 && maxVal <= 999) {
+                if (maxVal >= 6 && maxVal <= 999) {
                     PcLog("StorageCheck (" sx "," sy "): [" sText "] → " val "/" maxVal "  (attempt " attempts ")")
                     return val
                 }
@@ -12909,7 +13622,7 @@ PcCheckStorageEmpty() {
         }
         Sleep(80)
     }
-    PcLog("StorageCheck: no valid reading after " attempts " attempts" (pcIsBag ? " (bag)" : ""))
+    PcLog("StorageCheck: no valid reading after " attempts " attempts raw=[" sText "] cleaned=[" cleaned "]" (pcIsBag ? " (bag)" : ""))
     return -1
 }
 
@@ -12931,7 +13644,7 @@ PcToggleScanResize(*) {
     try Hotkey("$Right", PcScanGrowW, "On")
     try Hotkey("$Left", PcScanShrinkW, "On")
     try Hotkey("$Enter", PcScanResizeDone, "On")
-    ToolTip(" Scan Area: WASD=move  Arrows=resize  Enter=done", 0, 0)
+    ToolTip(" Storage scan area: WASD=move  Arrows=resize  Enter=done", 0, 0)
 }
 
 PcExitScanResize() {
@@ -13068,10 +13781,10 @@ PcLoadScanArea() {
 }
 
 ; ── 6×6 grid ─────────────────────────────────────────────────────
-PcPopcornGrid(skipFirst := false, isFinalCycle := true) {
+PcPopcornGrid(skipFirst := false, isFinalCycle := true, maxDrops := 0, dropsSoFar := 0) {
     global pcStartSlotX, pcStartSlotY, pcSlotW, pcSlotH
     global pcColumns, pcRows, pcDropSleep, pcDropKey, pcEarlyExit, pcHoverDelay, pcF1Abort
-    PcLog("Grid: dropKey=" pcDropKey "  dropSleep=" pcDropSleep "  hoverDelay=" pcHoverDelay "  skipFirst=" skipFirst "  isFinal=" isFinalCycle)
+    PcLog("Grid: dropKey=" pcDropKey "  dropSleep=" pcDropSleep "  hoverDelay=" pcHoverDelay "  skipFirst=" skipFirst "  isFinal=" isFinalCycle (maxDrops ? "  maxDrops=" maxDrops " soFar=" dropsSoFar : ""))
     dropCount := 0
     Loop pcRows {
         row := A_Index - 1
@@ -13094,12 +13807,198 @@ PcPopcornGrid(skipFirst := false, isFinalCycle := true) {
                 Sleep(pcHoverDelay)
             PcFastKey(pcDropKey)
             dropCount++
+            if (maxDrops && (dropsSoFar + dropCount) >= maxDrops) {
+                PcLog("Grid: max_drops reached (" (dropsSoFar + dropCount) "/" maxDrops ")")
+                return "max_reached"
+            }
             if (pcDropSleep > 0)
                 Sleep(pcDropSleep)
         }
     }
     PcLog("Grid: done — " dropCount " drops fired")
     return "done"
+}
+
+PcIsTameInventory() {
+    global pcPlayerInvDetectX, pcPlayerInvDetectY, pcPlayerInvDetectColor, pcPlayerInvDetectTol
+    global pcTameDetectX, pcTameDetectY, pcTameDetectColor, pcTameDetectTol
+    try pc := PxGet(pcPlayerInvDetectX, pcPlayerInvDetectY)
+    catch
+        pc := 0
+    pr := (pc >> 16) & 0xFF, pg := (pc >> 8) & 0xFF, pb := pc & 0xFF
+    epr := (pcPlayerInvDetectColor >> 16) & 0xFF
+    epg := (pcPlayerInvDetectColor >> 8) & 0xFF
+    epb := pcPlayerInvDetectColor & 0xFF
+    if (Abs(pr - epr) <= pcPlayerInvDetectTol && Abs(pg - epg) <= pcPlayerInvDetectTol && Abs(pb - epb) <= pcPlayerInvDetectTol) {
+        PcLog("TameDetect: PLAYER inv at (" pcPlayerInvDetectX "," pcPlayerInvDetectY ") color=0x" Format("{:06X}", pc) " — not tame")
+        return false
+    }
+    try tc := PxGet(pcTameDetectX, pcTameDetectY)
+    catch
+        tc := 0
+    tr := (tc >> 16) & 0xFF, tg := (tc >> 8) & 0xFF, tb := tc & 0xFF
+    etr := (pcTameDetectColor >> 16) & 0xFF
+    etg := (pcTameDetectColor >> 8) & 0xFF
+    etb := pcTameDetectColor & 0xFF
+    matched := (Abs(tr - etr) <= pcTameDetectTol && Abs(tg - etg) <= pcTameDetectTol && Abs(tb - etb) <= pcTameDetectTol)
+    if (matched)
+        PcLog("TameDetect: TAME at (" pcTameDetectX "," pcTameDetectY ") color=0x" Format("{:06X}", tc))
+    return matched
+}
+
+PcSelectWeightRegion() {
+    global pcOxyDetectX, pcOxyDetectY, pcOxyDetectColor, pcOxyDetectTol
+    global pcWeightNX, pcWeightNY, pcWeightNW, pcWeightNH
+    global pcWeightOX, pcWeightOY, pcWeightOW, pcWeightOH
+    global pcWeightOcrX, pcWeightOcrY, pcWeightOcrW, pcWeightOcrH
+    try color := PxGet(pcOxyDetectX, pcOxyDetectY)
+    catch
+        color := 0
+    r := (color >> 16) & 0xFF, g := (color >> 8) & 0xFF, b := color & 0xFF
+    er := (pcOxyDetectColor >> 16) & 0xFF
+    eg := (pcOxyDetectColor >> 8) & 0xFF
+    eb := pcOxyDetectColor & 0xFF
+    hasOxy := (Abs(r - er) <= pcOxyDetectTol && Abs(g - eg) <= pcOxyDetectTol && Abs(b - eb) <= pcOxyDetectTol)
+    if (hasOxy) {
+        pcWeightOcrX := pcWeightOX, pcWeightOcrY := pcWeightOY
+        pcWeightOcrW := pcWeightOW, pcWeightOcrH := pcWeightOH
+        PcLog("OxyDetect: HAS oxy — using has-oxy weight region")
+    } else {
+        pcWeightOcrX := pcWeightNX, pcWeightOcrY := pcWeightNY
+        pcWeightOcrW := pcWeightNW, pcWeightOcrH := pcWeightNH
+        PcLog("OxyDetect: NO oxy — using no-oxy weight region")
+    }
+}
+
+PcCheckWeight() {
+    global pcWeightOcrX, pcWeightOcrY, pcWeightOcrW, pcWeightOcrH
+    attempts := 0
+    while (attempts < 3) {
+        attempts++
+        try {
+            ocrText := OCR.FromRect(pcWeightOcrX, pcWeightOcrY, pcWeightOcrW, pcWeightOcrH, {scale: 3}).Text
+            cleaned := RegExReplace(ocrText, "[oO]", "0")
+            cleaned := RegExReplace(cleaned, "[Il|]", "1")
+            cleaned := RegExReplace(cleaned, "s(?=\d)", "5")
+            if RegExMatch(cleaned, "(\d+\.?\d*)\s*/\s*(\d+\.?\d*)", &m) {
+                val := Float(m[1])
+                PcLog("WeightOCR: " val "/" m[2] " raw=[" ocrText "]")
+                return val
+            }
+            PcLog("WeightOCR: no match raw=[" ocrText "] cleaned=[" cleaned "]")
+        } catch as e {
+            PcLog("WeightOCR: FAIL attempt " attempts " — " e.Message)
+        }
+        Sleep(80)
+    }
+    PcLog("WeightOCR: no valid reading after " attempts " attempts -> -1")
+    return -1.0
+}
+
+PcWaitWeightStable(timeoutS := 5.0) {
+    last := PcCheckWeight()
+    start := A_TickCount
+    while ((A_TickCount - start) / 1000 < timeoutS) {
+        Sleep(250)
+        cur := PcCheckWeight()
+        if (cur < 0)
+            continue
+        if (last >= 0 && Abs(cur - last) < 0.1) {
+            PcLog("WeightStable: settled at " cur " after " (A_TickCount - start) "ms")
+            return cur
+        }
+        last := cur
+    }
+    PcLog("WeightStable: timeout after " timeoutS "s, last=" last)
+    return last
+}
+
+PcRunDropLoop(label, maxDrops := 0) {
+    global pcIsTame, pcForgeSkipFirst, pcEarlyExit, pcF1Abort, pcCycleSleep, pcRows, pcColumns
+    isTame := PcIsTameInventory()
+    global pcIsTame := isTame
+    if (isTame)
+        return PcDropLoopTame(label, maxDrops)
+    return PcDropLoopStorage(label, maxDrops)
+}
+
+PcDropLoopTame(label, maxDrops := 0) {
+    global pcForgeSkipFirst, pcEarlyExit, pcF1Abort, pcCycleSleep, pcRows, pcColumns
+    PcSelectWeightRegion()
+    PcLog("DropLoop(tame): " label " — starting" (maxDrops ? " maxDrops=" maxDrops : ""))
+    passNum := 0
+    zeroCount := 0
+    totalDrops := 0
+    while (!pcEarlyExit && !pcF1Abort) {
+        passNum++
+        result := PcPopcornGrid(pcForgeSkipFirst, , maxDrops, totalDrops)
+        gridDrops := pcRows * pcColumns
+        if (maxDrops)
+            gridDrops := Min(gridDrops, maxDrops - totalDrops)
+        totalDrops += gridDrops
+        if (result = "max_reached") {
+            PcLog("DropLoop(tame): max_drops reached after pass " passNum)
+            break
+        }
+        if (pcEarlyExit || pcF1Abort) {
+            PcLog("DropLoop(tame): pass " passNum " — early exit")
+            break
+        }
+        cur := PcCheckWeight()
+        PcLog("DropLoop(tame): pass " passNum " weight=" cur)
+        if (cur >= 0 && cur < 20.1) {
+            zeroCount++
+            if (zeroCount >= 2) {
+                PcLog("DropLoop(tame): weight<=20 (saddle only) — done")
+                PcPopcornTopRow()
+                break
+            }
+        } else {
+            zeroCount := 0
+        }
+        Sleep(pcCycleSleep)
+    }
+    PcLog("DropLoop(tame): " label " ended after " passNum " passes, " totalDrops " drops")
+    return passNum
+}
+
+PcDropLoopStorage(label, maxDrops := 0) {
+    global pcForgeSkipFirst, pcEarlyExit, pcF1Abort, pcCycleSleep, pcRows, pcColumns
+    passNum := 0
+    totalDrops := 0
+    stallCount := 0
+    lastStorage := -99
+    while (!pcEarlyExit && !pcF1Abort) {
+        passNum++
+        PcPopcornGrid(pcForgeSkipFirst, , maxDrops, totalDrops)
+        gridDrops := pcRows * pcColumns
+        if (maxDrops)
+            gridDrops := Min(gridDrops, maxDrops - totalDrops)
+        totalDrops += gridDrops
+        if (pcEarlyExit || pcF1Abort)
+            break
+        if (passNum > 1) {
+            chk := PcCheckStorageEmpty()
+            if (chk = 0) {
+                PcLog("DropLoopStorage: storage=0 after pass " passNum " — top row cleanup")
+                PcPopcornTopRow()
+                break
+            }
+            if (chk = lastStorage) {
+                stallCount++
+                if (stallCount >= 3) {
+                    PcLog("DropLoopStorage: stalled at " chk " for 3 passes — filter done or drop cap")
+                    break
+                }
+            } else {
+                lastStorage := chk
+                stallCount := 0
+            }
+        }
+        Sleep(pcCycleSleep)
+    }
+    PcLog("DropLoopStorage: " label " ended after " passNum " passes")
+    return passNum
 }
 
 PcPopcornTopRow() {
@@ -13399,11 +14298,20 @@ PcRunCurrentMode() {
             PcLog("RunCurrentMode: bag/cache detected at (" pcBagDetectX "," pcBagDetectY ")")
         }
     }
+    global pcIsTame := false
     if (pcF10Step > 0)
         ToolTip(PcBuildF10Tooltip(), 0, 0)
     else
         ToolTip(PcBuildTooltip(), 0, 0)
-    PcUnifiedRun()
+
+    isTame := PcIsTameInventory()
+    global pcIsTame := isTame
+    if (isTame) {
+        PcLog("RunCurrentMode: TAME inventory — using weight-based drop loop")
+        PcDropLoopTame("tame-unified")
+    } else {
+        PcUnifiedRun()
+    }
     global pcRunning   := false
     global pcEarlyExit := false
     global pcF1Abort   := false
@@ -13526,10 +14434,9 @@ PcUnifiedRun() {
                 }
                 Sleep(pcCycleSleep)
             }
-            PcLog("UnifiedRun: " labels[i] " ended after " passNum " passes")
+            PcLog("UnifiedRun: " labels[i] " ended after " passNum " passes" (stalled ? " (stalled)" : ""))
+            stalled := false
             if (pcF1Abort)
-                break
-            if (stalled)
                 break
         }
         PcLog("UnifiedRun: all steps done")
@@ -15092,7 +15999,7 @@ $F5:: {
 }
 
 $F3:: {
-    if (macroTabActive && guiVisible) {
+    if (macroTabActive) {
         MacroPlaySelected()
         return
     }
@@ -15134,10 +16041,8 @@ $F1:: {
         MacroSaveIfDirty()
     }
     if (!guiVisible) {
-        if (pcRunning) {
-            global pcEarlyExit := true
-            global pcF1Abort   := true
-        }
+        global pcEarlyExit := true
+        global pcF1Abort   := true
         if (pcMode > 0 || pcF10Step > 0) {
             global pcMode := 0
             global pcF10Step := 0
@@ -15225,6 +16130,7 @@ $F1:: {
             MacroSaveIfDirty()
         }
         global macroArmed := false
+        MacroDisarmPopcornF()
         MacroRegisterHotkeys(ModeSelectTab.Value = 1 || ModeSelectTab.Value = 7)
         MainGui.Show("x177 y330")
         Sleep(100)
@@ -15591,7 +16497,7 @@ PcHotkeyBracketRight(thisHotkey) {
         if (activeMacro.type = "repeat" && activeMacro.repeatKeys.Length > 1) {
             global macroRepeatKeyIdx := Mod(macroRepeatKeyIdx, activeMacro.repeatKeys.Length) + 1
             curKey := activeMacro.repeatKeys[macroRepeatKeyIdx]
-            if (activeMacro.repeatSpam)
+            if (activeMacro.repeatSpam || activeMacro.repeatInterval = 0)
                 MacroRepeatBuildTooltip(activeMacro, curKey)
             return
         }
