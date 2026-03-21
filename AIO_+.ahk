@@ -167,6 +167,10 @@ global nsAltRadialX := Round(1176 * widthmultiplier)
 global nsAltRadialY := Round(948  * heightmultiplier)
 global nsAltClickX  := Round(1179 * widthmultiplier)
 global nsAltClickY  := Round(948  * heightmultiplier)
+global nsAlt2RadialX := Round(1489 * widthmultiplier)
+global nsAlt2RadialY := Round(523  * heightmultiplier)
+global nsAlt2ClickX  := Round(1033 * widthmultiplier)
+global nsAlt2ClickY  := Round(764  * heightmultiplier)
 global nsSpayX    := Round(1025 * widthmultiplier)
 global nsSpayY    := Round(561  * heightmultiplier)
 global nsAdminPixX := Round(1035 * widthmultiplier)
@@ -3138,6 +3142,7 @@ NsLog(msg) {
 nameAndSpayEpressed() {
     global runNameAndSpayScript, arkwindow, widthmultiplier, heightmultiplier
     global nsRadialX, nsRadialY, nsSpayX, nsSpayY, nsAltRadialX, nsAltRadialY, nsAltClickX, nsAltClickY
+    global nsAlt2RadialX, nsAlt2RadialY, nsAlt2ClickX, nsAlt2ClickY
     global nsAdminPixX, nsAdminPixY, nsAdminSpayX, nsAdminSpayY
     global nsCryoBtn, invyDetectX, invyDetectY
 
@@ -3148,6 +3153,7 @@ nameAndSpayEpressed() {
 
     NsLog("E pressed — starting Name/Spay")
     NsLog("radial=(" nsRadialX "," nsRadialY ")  altDetect=(" nsAltRadialX "," nsAltRadialY ")  altClick=(" nsAltClickX "," nsAltClickY ")")
+    NsLog("alt2Detect=(" nsAlt2RadialX "," nsAlt2RadialY ")  alt2Click=(" nsAlt2ClickX "," nsAlt2ClickY ")")
     NsLog("spay=(" nsSpayX "," nsSpayY ")  adminDetect=(" nsAdminPixX "," nsAdminPixY ")  adminSpay=(" nsAdminSpayX "," nsAdminSpayY ")")
 
     ; ── Step 1:────────────────────────
@@ -3189,20 +3195,27 @@ nameAndSpayEpressed() {
     NsLog("[2] Sending E down (hold)")
     Send("{e down}")
     Sleep(300)
-    altLayout := false
+    radialLayout := "standard"
     loop 20 {
+        if (NFSearchTol(&X, &Y, nsAlt2RadialX, nsAlt2RadialY, nsAlt2RadialX+1, nsAlt2RadialY+1, "0xFFFFFF", 10)) {
+            radialLayout := "alt2"
+            break
+        }
         if (NFSearchTol(&X, &Y, nsAltRadialX, nsAltRadialY, nsAltRadialX+1, nsAltRadialY+1, "0xFFFFFF", 10)) {
-            altLayout := true
+            radialLayout := "alt"
             break
         }
         Sleep(20)
     }
-    NsLog("[2] Radial wheel open — alt=" (altLayout ? "YES" : "NO"))
+    NsLog("[2] Radial wheel open — layout=" radialLayout)
 
     ; ── Step 3: ───────────────────
-    if (altLayout) {
+    if (radialLayout = "alt") {
         NsLog("[3] Alt radial — clicking (" nsAltClickX "," nsAltClickY ")")
         MouseMove(nsAltClickX, nsAltClickY, 0)
+    } else if (radialLayout = "alt2") {
+        NsLog("[3] Alt2 radial — clicking (" nsAlt2ClickX "," nsAlt2ClickY ")")
+        MouseMove(nsAlt2ClickX, nsAlt2ClickY, 0)
     } else {
         NsLog("[3] Standard radial — clicking (" nsRadialX "," nsRadialY ")")
         MouseMove(nsRadialX, nsRadialY, 0)
@@ -16984,6 +16997,7 @@ F11:: {
     out .= "`n--- Name/Spay ---`n"
     out .= _DebugPxCheck("radial", nsRadialX, nsRadialY, 0xFFFFFF)
     out .= _DebugPxCheck("altRadial", nsAltRadialX, nsAltRadialY, 0xFFFFFF)
+    out .= _DebugPxCheck("alt2Radial", nsAlt2RadialX, nsAlt2RadialY, 0xFFFFFF)
     out .= _DebugPxCheck("adminPix", nsAdminPixX, nsAdminPixY, 0xFFFFFF)
     out .= _DebugPx("spayPix", nsSpayX, nsSpayY)
 
