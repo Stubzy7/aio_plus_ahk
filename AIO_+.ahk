@@ -5181,7 +5181,6 @@ MacroArmPopcornF(idx) {
     global macroPopcornArmed, macroPopcornMacro, macroList
     global macroPopcornArmed := true
     global macroPopcornMacro := macroList[idx]
-    try Hotkey("$f", MacroPopcornFHandler, "On")
     MacroLog("PopcornF: armed for '" macroList[idx].name "'")
 }
 
@@ -5189,34 +5188,14 @@ MacroDisarmPopcornF() {
     global macroPopcornArmed, macroPopcornMacro
     global macroPopcornArmed := false
     global macroPopcornMacro := ""
-    try Hotkey("$f", "Off")
-}
-
-MacroPopcornFHandler(*) {
-    global macroPopcornArmed, macroPopcornMacro, macroPlaying, macroArmed, arkwindow
-    if (!macroPopcornArmed || macroPlaying || !macroArmed)
-        return
-    if (!WinActive(arkwindow)) {
-        Send("{f}")
-        return
-    }
-    m := macroPopcornMacro
-    if (!IsObject(m)) {
-        MacroLog("PopcornF: no macro object — disarming")
-        MacroDisarmPopcornF()
-        return
-    }
-    MacroLog("PopcornF: F pressed — running popcorn for '" m.name "'")
-    MacroDisarmPopcornF()
-    SetTimer(MacroPopcornFThread.Bind(m), -1)
 }
 
 MacroPopcornFThread(m) {
-    global arkwindow, macroArmed, macroSelectedIdx, macroList
+    global arkwindow, macroArmed, macroSelectedIdx, macroList, macroTabActive
     Send("{f}")
     Sleep(200)
     MacroRepeatPopcornSequence(m)
-    if (macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
+    if (macroArmed && macroTabActive && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
         sel := macroList[macroSelectedIdx]
         if (sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0)
             MacroArmPopcornF(macroSelectedIdx)
@@ -16195,6 +16174,13 @@ $F1:: {
             return
         }
     }
+    if (macroPopcornArmed && macroArmed && !macroPlaying && IsObject(macroPopcornMacro)) {
+        m := macroPopcornMacro
+        MacroLog("PopcornF: F pressed — running popcorn for '" m.name "'")
+        MacroDisarmPopcornF()
+        SetTimer(MacroPopcornFThread.Bind(m), -1)
+        return
+    }
     if (acCountOnlyActive && !acRunning) {
         global lastDebugContext := "craft"
         SetTimer(AcCountOnlyFPressed, -1)
@@ -16231,15 +16217,15 @@ $F1:: {
     if (runMagicFScript) {
         global lastDebugContext := "magicf"
         magicFpressed()
+    } else if (runAutoLvlScript) {
+        global lastDebugContext := "autolvl"
+        autoLvLFpressed()
     } else if (quickFeedMode > 0) {
         global lastDebugContext := "feed"
         QuickFeedFPressed()
     } else if (gmkMode != "off") {
         global lastDebugContext := "gmk"
         GmkFPressed()
-    } else if (runAutoLvlScript) {
-        global lastDebugContext := "autolvl"
-        autoLvLFpressed()
     } else if (depoCycleIdx > 0 && depoCycle.Length > 0 && depoCycle[depoCycleIdx].filter != "") {
         global lastDebugContext := "depo"
         DepoFPressed()

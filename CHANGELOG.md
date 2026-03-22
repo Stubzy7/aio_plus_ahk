@@ -2,6 +2,10 @@
 
 ---
 
+Fixed AutoLvL and all F key features broken by MacroDisarmPopcornF killing the static ~$F:: handler via Hotkey("$f","Off")
+
+---
+
 Popcorn OCR + macro tab improvements
 - OCR detects tame vs storage inventories, uses weight for tames
 - Tame popcorn stops at saddle weight via weight OCR
