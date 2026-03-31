@@ -2,6 +2,12 @@
 
 ---
 
+Fixed Name/Spay E hold missing the radial wheel
+Fixed F key being stolen by macro popcorn when hatch or depo modes are active
+F1 now keeps hatch/claim/name/depo checkbox selections when showing UI
+
+---
+
 Fixed AutoLvL and all F key features broken by MacroDisarmPopcornF killing the static ~$F:: handler via Hotkey("$f","Off")
 
 ---

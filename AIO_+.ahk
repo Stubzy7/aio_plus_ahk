@@ -1153,8 +1153,7 @@ MainGui.Add("Text","x25 y374 w160"," F12 — Grab My Kit").SetFont("s9 c888888 I
 global gmkStatusTxt := MainGui.Add("Text","x150 y374 w60","")
 gmkStatusTxt.SetFont("s8 c00FF00","Segoe UI")
 
-; GG foreground layer — Delta + gradient Relief (rendered as bitmap)
-; ── GDI+ startup for GG art ──
+; GG Delta + Relief (rendered as bitmap)
 DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
 _ggSI := Buffer(24, 0)
 NumPut("UInt", 1, _ggSI, 0)
@@ -1225,7 +1224,6 @@ for , _pp in _ggPipes {
 DllCall("gdiplus\GdipDeleteFontFamily", "Ptr", _ggFamily)
 DllCall("gdiplus\GdipDeleteStringFormat", "Ptr", _ggFmt)
 
-; ── Save and add as Picture control ──
 DllCall("gdiplus\GdipCreateHBITMAPFromBitmap", "Ptr", _ggBmp, "Ptr*", &_ggHBmp := 0, "UInt", 0xFF000000)
 DllCall("gdiplus\GdipDeleteGraphics", "Ptr", _ggG)
 DllCall("gdiplus\GdipDisposeImage", "Ptr", _ggBmp)
@@ -3024,6 +3022,7 @@ autoLvLFpressed() {
         return
     
     slot := autoLvlCycleSlots[autoLvlCycleIdx]
+    PcLog("AutoLvl: F pressed — slot " autoLvlCycleIdx "/" autoLvlCycleSlots.Length " [" slot.label "]")
     
     waitOpenInvCount := 0
     autolvlOpenInv   := true
@@ -3037,30 +3036,51 @@ autoLvLFpressed() {
         }
     }
     
+    if (!autolvlOpenInv) {
+        PcLog("AutoLvl: inventory never opened (timeout after " waitOpenInvCount " checks)")
+        return
+    }
+    
     if (autolvlOpenInv) {
+        invLost := false
         for s in slot.stats {
             pts := s.edit.Value
             if (pts <= 0)
                 continue
             colBefore := PxGet(s.pixX, s.pixY)
-            lvlStat(pts, Round(1507 * widthmultiplier), s.clickY)
+            if (!lvlStat(pts, Round(1507 * widthmultiplier), s.clickY)) {
+                PcLog("AutoLvl: inventory lost during " s.name " — aborting (no Esc sent)")
+                invLost := true
+                break
+            }
             if (!AutoLvlWaitStatChange(s.pixX, s.pixY, colBefore))
                 return
         }
         
-        if (AutoSaddleCheckBox.Value = true) {
-            Sleep(100)
-            MouseMove(413*widthmultiplier, 386*heightmultiplier, 0)
-            Sleep(100)
-            Click
-            Sleep(200)
-            ControlSend("{e}",, arkwindow)
-            Sleep(25)
-        }
-        ControlSend("{Esc}",, arkwindow)
-        if (autoLvlCryoCheck.Value) {
-            Sleep(1900)
-            Send("{Click}")
+        if (!invLost) {
+            if (AutoSaddleCheckBox.Value = true) {
+                Sleep(100)
+                MouseMove(413*widthmultiplier, 386*heightmultiplier, 0)
+                Sleep(100)
+                Click
+                Sleep(200)
+                ControlSend("{e}",, arkwindow)
+                Sleep(25)
+            }
+            _nfEsc := 0
+            invCheckX := Round(1632 * widthmultiplier)
+            invCheckY := Round(215 * heightmultiplier)
+            invStillOpen := NFPixelWait(invCheckX, invCheckY, invCheckX + 1, invCheckY + 1, "0xFFFFFF", 0, &_nfEsc)
+            if (invStillOpen) {
+                ControlSend("{Esc}",, arkwindow)
+                PcLog("AutoLvl: done — sent Esc to close inventory")
+            } else {
+                PcLog("AutoLvl: inventory already closed before Esc — skipped Esc (would have opened pause menu)")
+            }
+            if (autoLvlCryoCheck.Value) {
+                Sleep(1900)
+                Send("{Click}")
+            }
         }
         AutoLvlShowTooltip()
     }
@@ -3079,10 +3099,22 @@ AutoLvlWaitStatChange(px, py, colBefore) {
 }
 
 lvlStat(amount, x, y) {
+    global widthmultiplier, heightmultiplier
+    invCheckX := Round(1632 * widthmultiplier)
+    invCheckY := Round(215 * heightmultiplier)
     MouseMove(x, y)
+    _nfTmp := 0
     loop (amount) {
         Click
+        if (Mod(A_Index, 10) = 0) {
+            stillOpen := NFPixelWait(invCheckX, invCheckY, invCheckX + 1, invCheckY + 1, "0xFFFFFF", 0, &_nfTmp)
+            if (!stillOpen) {
+                PcLog("lvlStat: INVENTORY CLOSED mid-loop at click " A_Index "/" amount " — remaining clicks may hit game world")
+                return false
+            }
+        }
     }
+    return true
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -3340,6 +3372,8 @@ QhStart(*) {
 
     MainGui.Hide()
     global guiVisible := false
+
+    MacroDisarmPopcornF()
 
     depoCycle := []
     if (hasDepoE) {
@@ -5250,6 +5284,13 @@ MacroRepeatPopcornSequence(m) {
     MacroLog("RepeatPopcorn: done — inventory closed")
 }
 
+_PyroNearWhite(col, tol := 40) {
+    r := (col >> 16) & 0xFF, g := (col >> 8) & 0xFF, b := col & 0xFF
+    return ((Abs(r - 255) + Abs(g - 255) + Abs(b - 255)) < tol)
+}
+_PyroColStr(col) {
+    return Format("0x{:06X}", col) " R=" ((col >> 16) & 0xFF) " G=" ((col >> 8) & 0xFF) " B=" (col & 0xFF)
+}
 MacroPlayPyroThread(m) {
     global macroPlaying, macroActiveIdx, arkwindow
     global pyroAstTekDetX, pyroAstTekDetY, pyroAstTekClkX, pyroAstTekClkY
@@ -5262,7 +5303,9 @@ MacroPlayPyroThread(m) {
     CoordMode("Mouse", "Screen")
     CoordMode("Pixel", "Screen")
     sp := m.speedMult
+    MacroLog("Pyro: thread started — speed=" sp)
     if !WinActive(arkwindow) {
+        MacroLog("Pyro: ark window not active — aborting")
         global macroPlaying := false
         global macroActiveIdx := 0
         MacroSaveIfDirty()
@@ -5271,15 +5314,15 @@ MacroPlayPyroThread(m) {
     try dismountCol := PxGet(pyroDismountX, pyroDismountY)
     catch
         dismountCol := ""
-    isDismountR := (dismountCol = "0xD45F12")
+    MacroLog("Pyro: dismount pixel (" pyroDismountX "," pyroDismountY ")=" (dismountCol != "" ? _PyroColStr(dismountCol) : "ERR"))
+    isDismountR := (dismountCol != "" && dismountCol = 0xD45F12)
     isDismountG := false
-    if (!isDismountR) {
-        r := (Integer("0x" SubStr(dismountCol, 3, 2)))
-        g := (Integer("0x" SubStr(dismountCol, 5, 2)))
-        b := (Integer("0x" SubStr(dismountCol, 7, 2)))
+    if (!isDismountR && dismountCol != "") {
+        r := (dismountCol >> 16) & 0xFF, g := (dismountCol >> 8) & 0xFF, b := dismountCol & 0xFF
         isDismountG := (Abs(r - 0xD4) + Abs(g - 0x5F) + Abs(b - 0x12)) < 40
     }
     if (isDismountR || isDismountG) {
+        MacroLog("Pyro: dismount detected — spamming Ctrl+C")
         ToolTip(" Pyro: Dismounting...`n Spamming Ctrl+C`n F1 = Stop", 0, 0)
         loop 200 {
             if (!macroPlaying || macroActiveIdx != myIdx) {
@@ -5293,11 +5336,10 @@ MacroPlayPyroThread(m) {
             try checkCol := PxGet(pyroDismountX, pyroDismountY)
             catch
                 checkCol := ""
-            if (checkCol != "0xD45F12") {
-                rc := Integer("0x" SubStr(checkCol, 3, 2))
-                gc := Integer("0x" SubStr(checkCol, 5, 2))
-                bc := Integer("0x" SubStr(checkCol, 7, 2))
+            if (checkCol != "" && checkCol != 0xD45F12) {
+                rc := (checkCol >> 16) & 0xFF, gc := (checkCol >> 8) & 0xFF, bc := checkCol & 0xFF
                 if ((Abs(rc - 0xD4) + Abs(gc - 0x5F) + Abs(bc - 0x12)) >= 40) {
+                    MacroLog("Pyro: dismount cleared — back on shoulder")
                     ToolTip(" Pyro: Back on shoulder!`n R = mount  |  F1 = disarm", 0, 0)
                     break
                 }
@@ -5310,6 +5352,7 @@ MacroPlayPyroThread(m) {
         }
         return
     }
+    MacroLog("Pyro: mounting — holding R for radial")
     ToolTip(" Pyro: Mounting...`n Holding R for radial`n F1 = Stop", 0, 0)
     Send("{r Down}")
     Sleep(Integer(450 * sp))
@@ -5321,45 +5364,34 @@ MacroPlayPyroThread(m) {
     firstClickX := 0
     firstClickY := 0
     contextName := ""
-    try {
-        c1 := PxGet(pyroAstTekDetX, pyroAstTekDetY)
-        if (c1 = "0xFFFFFF") {
-            firstClickX := pyroAstTekClkX
-            firstClickY := pyroAstTekClkY
-            contextName := "Asteros + Tek"
-        }
+    c1 := "", c2 := "", c3 := "", c4 := ""
+    try c1 := PxGet(pyroAstTekDetX, pyroAstTekDetY)
+    try c2 := PxGet(pyroAstNoTekDetX, pyroAstNoTekDetY)
+    try c3 := PxGet(pyroNonTekDetX, pyroNonTekDetY)
+    try c4 := PxGet(pyroNonNoTekDetX, pyroNonNoTekDetY)
+    MacroLog("Pyro: context pixels — astTek=" (c1 != "" ? _PyroColStr(c1) : "ERR") " astNoTek=" (c2 != "" ? _PyroColStr(c2) : "ERR") " nonTek=" (c3 != "" ? _PyroColStr(c3) : "ERR") " nonNoTek=" (c4 != "" ? _PyroColStr(c4) : "ERR"))
+    if (c1 != "" && _PyroNearWhite(c1)) {
+        firstClickX := pyroAstTekClkX
+        firstClickY := pyroAstTekClkY
+        contextName := "Asteros + Tek"
+    }
+    if (contextName = "" && c2 != "" && _PyroNearWhite(c2)) {
+        firstClickX := pyroAstNoTekClkX
+        firstClickY := pyroAstNoTekClkY
+        contextName := "Asteros"
+    }
+    if (contextName = "" && c3 != "" && _PyroNearWhite(c3)) {
+        firstClickX := pyroNonTekClkX
+        firstClickY := pyroNonTekClkY
+        contextName := "Tek Helm"
+    }
+    if (contextName = "" && c4 != "" && _PyroNearWhite(c4)) {
+        firstClickX := pyroNonNoTekClkX
+        firstClickY := pyroNonNoTekClkY
+        contextName := "No Helm"
     }
     if (contextName = "") {
-        try {
-            c2 := PxGet(pyroAstNoTekDetX, pyroAstNoTekDetY)
-            if (c2 = "0xFFFFFF") {
-                firstClickX := pyroAstNoTekClkX
-                firstClickY := pyroAstNoTekClkY
-                contextName := "Asteros"
-            }
-        }
-    }
-    if (contextName = "") {
-        try {
-            c3 := PxGet(pyroNonTekDetX, pyroNonTekDetY)
-            if (c3 = "0xFFFFFF") {
-                firstClickX := pyroNonTekClkX
-                firstClickY := pyroNonTekClkY
-                contextName := "Tek Helm"
-            }
-        }
-    }
-    if (contextName = "") {
-        try {
-            c4 := PxGet(pyroNonNoTekDetX, pyroNonNoTekDetY)
-            if (c4 = "0xFFFFFF") {
-                firstClickX := pyroNonNoTekClkX
-                firstClickY := pyroNonNoTekClkY
-                contextName := "No Helm"
-            }
-        }
-    }
-    if (contextName = "") {
+        MacroLog("Pyro: no context detected — all pixels failed white check (tol=40)")
         ToolTip(" Pyro: No context detected — aborting`n R = retry  |  F1 = disarm", 0, 0)
         Send("{r Up}")
         if (macroActiveIdx = myIdx) {
@@ -5369,6 +5401,7 @@ MacroPlayPyroThread(m) {
         }
         return
     }
+    MacroLog("Pyro: context='" contextName "' — clicking (" firstClickX "," firstClickY ")")
     ToolTip(" Pyro: " contextName " detected`n Clicking first option...`n F1 = Stop", 0, 0)
     MouseMove(firstClickX, firstClickY, 0)
     Sleep(Integer(50 * sp))
@@ -5382,7 +5415,9 @@ MacroPlayPyroThread(m) {
     try throwCol := PxGet(pyroThrowCheckX, pyroThrowCheckY)
     catch
         throwCol := ""
-    if (throwCol = "0xFFFFFF") {
+    MacroLog("Pyro: throwCheck (" pyroThrowCheckX "," pyroThrowCheckY ")=" (throwCol != "" ? _PyroColStr(throwCol) : "ERR"))
+    if (throwCol != "" && _PyroNearWhite(throwCol)) {
+        MacroLog("Pyro: THROW detected — aborting")
         ToolTip(" Pyro: THROW detected (enclosed space)`n Aborting — need more room!`n R = retry  |  F1 = disarm", 0, 0)
         Send("{r Up}")
         Sleep(500)
@@ -5396,7 +5431,9 @@ MacroPlayPyroThread(m) {
     try rideCol := PxGet(pyroRideConfirmX, pyroRideConfirmY)
     catch
         rideCol := ""
-    if (rideCol = "0xFFFFFF") {
+    MacroLog("Pyro: rideConfirm (" pyroRideConfirmX "," pyroRideConfirmY ")=" (rideCol != "" ? _PyroColStr(rideCol) : "ERR"))
+    if (rideCol != "" && _PyroNearWhite(rideCol)) {
+        MacroLog("Pyro: ride confirmed — mounting")
         ToolTip(" Pyro: Ride confirmed! Mounting...`n F1 = Stop", 0, 0)
     }
     MouseMove(pyroMountClickX, pyroMountClickY, 0)
@@ -5404,6 +5441,7 @@ MacroPlayPyroThread(m) {
     Click("Left")
     Sleep(Integer(100 * sp))
     Send("{r Up}")
+    MacroLog("Pyro: mount sequence complete")
     ToolTip(" Pyro: Mounted!`n R = dismount  |  F1 = disarm", 0, 0)
     if (macroActiveIdx = myIdx) {
         global macroPlaying := false
@@ -16092,18 +16130,15 @@ $F1:: {
         try DarkBtnText(StartAutoLvlButton, "START")
         global runClaimAndNameScript := false
         global runNameAndSpayScript  := false
-        ImprintStopAll()
-        try DarkBtnText(imprintStartBtn, "Start")
-        try imprintStatusTxt.Text := "Press Start then R=read Q=auto"
         global qhArmed               := false
         global qhRunning             := false
-        global qhMode                := 0
         global depoEggsActive        := false
         global depoEmbryoActive      := false
         global depoCycle              := []
         global depoCycleIdx           := 0
-        try qhAllBtn.Value           := 0
-        try qhSingleBtn.Value        := 0
+        ImprintStopAll()
+        try DarkBtnText(imprintStartBtn, "Start")
+        try imprintStatusTxt.Text := "Press Start then R=read Q=auto"
         try Hotkey("$[", "Off")
         try Hotkey("$]", "Off")
         global quickFeedMode         := 0
@@ -16167,14 +16202,15 @@ $F1:: {
 ~$F:: {
     if (!WinActive(arkwindow))
         return
-    if (macroHotkeysLive && macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
+    _miscActive := (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive || depoEmbryoActive)
+    if (!_miscActive && macroHotkeysLive && macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
         sel := macroList[macroSelectedIdx]
         if (sel.hotkey = "f" && sel.type != "guided" && sel.type != "combo") {
             MacroHotkeyHandler(macroSelectedIdx, "~$f")
             return
         }
     }
-    if (macroPopcornArmed && macroArmed && !macroPlaying && IsObject(macroPopcornMacro)) {
+    if (!_miscActive && macroPopcornArmed && macroArmed && !macroPlaying && IsObject(macroPopcornMacro)) {
         m := macroPopcornMacro
         MacroLog("PopcornF: F pressed — running popcorn for '" m.name "'")
         MacroDisarmPopcornF()
@@ -16869,6 +16905,12 @@ F11:: {
     else if (ctx = "autolvl") {
         out .= "AutoLvL — check tooltip for current state`n"
         out .= "runAutoLvlScript: " runAutoLvlScript "`n"
+        if (IsSet(pcLogEntries) && pcLogEntries.Length > 0) {
+            out .= "`n=== AUTOLVL LOG ===`n"
+            for i, v in pcLogEntries
+                out .= " " v "`n"
+        } else
+            out .= "(no autolvl log entries)`n"
     }
 
     else if (ctx = "ini") {
