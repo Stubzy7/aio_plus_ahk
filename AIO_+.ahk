@@ -378,6 +378,7 @@ global sheepLvlClickY := Round(sy * (667  / 1440))
 
 global overcappingToggle   := false
 global sheepRunning        := false
+global sheepBgHeld         := false
 global sheepAutoLvlActive  := false
 global sheepModeActive     := false
 global sheepStatusBottomAnchor := 0
@@ -392,6 +393,8 @@ global sheepInventoryKey   := ""
 ;─────────────────────────────────────────────────────────────────────────────
 ;─────────────────────────────────────────────────────────────────────────────
 global pcMode              := 0
+global pcInvHotkeyActive   := ""
+global pcAccessKey         := "f"
 global pcInvKey            := "f"
 global pcDropKey           := "g"
 global pcRunning           := false
@@ -614,6 +617,8 @@ global guidedTurboDefault   := 30
 global guidedSingleItem     := false
 global guidedActionType    := "record"
 global guidedTakeCount     := 3
+global guidedTransferMode  := "stack"
+global guidedStackSize     := 100
 
 global guidedInvReadyX      := Round(1627 * widthmultiplier)
 global guidedInvReadyY      := Round(332  * heightmultiplier)
@@ -1137,7 +1142,8 @@ global overcapCountdown := MainGui.Add("Text","x157 y262 w170","")
 overcapCountdown.SetFont("s8 c00FF00","Segoe UI")
 MainGui.Add("Text","x25 y276 w300"," F3 — Quick Feed  (Raw → Berry → Off)").SetFont("s9 c888888 Italic","Segoe UI")
 MainGui.Add("Text","x25 y290 w300"," F5 — Apply INI  (paste custom in Misc)").SetFont("s9 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x25 y304 w165"," F6 — Fill OB  (F to upload)").SetFont("s9 c888888 Italic","Segoe UI")
+global obF6Label := MainGui.Add("Text","x25 y304 w165"," F6 — Fill OB  (" StrUpper(pcAccessKey) " to upload)")
+obF6Label.SetFont("s9 c888888 Italic","Segoe UI")
 global obStatusText := MainGui.Add("Text","x190 y304 w250","")
 obStatusText.SetFont("s8 c00FF00","Segoe UI")
 MainGui.Add("Text","x25 y318 w165"," F7 — Empty OB  (F7 at trans)").SetFont("s9 c888888 Italic","Segoe UI")
@@ -1371,7 +1377,7 @@ MagicFToggleRefill(*) {
         if (runMagicFScript) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
-            try Hotkey("$z", "Off")
+            SafeDisableZ()
             ToolTip()
         }
     }
@@ -1390,11 +1396,11 @@ MagicFShowHelp(*) {
     mfHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     mfHelpGui.Add("Text", "x45 y38 w255",
         "Select Give OR Take presets (any amount)`n"
-        . "  F at inventory = transfer current preset`n"
+        . "  " StrUpper(pcAccessKey) " at inventory = transfer current preset`n"
         . "  Q = cycle presets  |  Z = swap give↔take`n`n"
         . "Take/Refill:`n"
         . "  Press Take/Refill then select one preset from BOTH Give and Take`n"
-        . "  F at inventory = take all, then give all`n"
+        . "  " StrUpper(pcAccessKey) " at inventory = take all, then give all`n"
         . "Custom: type filter text + check Custom`n"
         . "F1 = stop / show UI")
     mfHelpGui.SetFont("s9 cFFFFFF Bold", "Segoe UI")
@@ -1556,8 +1562,6 @@ MainGui.Add("Text", "x32 y166 w72 h16", "Drop Key:")
 pcDropKeyTxt := MainGui.Add("Text", "x98 y166 w60 h16 cFF4444", pcDropKey)
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-pcCalibrateBtn := DarkBtn(MainGui, "x32 y188 w120 h28", "Set Keys", _RED_BGR, _DK_BG, -12, false)
-pcCalibrateBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
 
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 pcScanAreaBtn := DarkBtn(MainGui, "x280 y188 w80 h28", "Scan Area", _RED_BGR, _DK_BG, -11, true)
@@ -1570,7 +1574,7 @@ pcExecBtn.OnEvent("Click", (*) => PcExecuteBtn())
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 MainGui.Add("Text", "x32 y219 w354 h14 Center", "Z = Change drop speed  |  Q = Cycle selected presets")
 MainGui.Add("Text", "x32 y233 w354 h14 Center", "Auto-stops when storage empty  |  F1 = Stop")
-pcStatusTxt := MainGui.Add("Text", "x32 y249 w354 h14 Center cDDDDDD", "Select a mode then press F at an inventory")
+pcStatusTxt := MainGui.Add("Text", "x32 y249 w354 h14 Center cDDDDDD", "Select a mode then press " StrUpper(pcAccessKey) " at an inventory")
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1887,6 +1891,9 @@ iniSaveCustomBtn.OnEvent("Click", IniSaveCustomCommand)
 hatchSaveBtn := DarkBtn(MainGui, "x22 y324 w70 h20", "Save Hatch", _RED_BGR, _DK_BG, -11, true)
 hatchSaveBtn.OnEvent("Click", SaveHatchSettings)
 
+global miscSetKeysBtn := DarkBtn(MainGui, "x22 y348 w70 h20", "Set Keys", _RED_BGR, _DK_BG, -11, true)
+miscSetKeysBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
+
 ; --- AUTO PIN / NVIDIA FILTER ---
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
 MainGui.Add("Text", "x122 y324 w10 h40 +0x200", "|")
@@ -2013,7 +2020,7 @@ macroDownBtn := DarkBtn(MainGui, "x410 y246 w26 h26", Chr(0x25BC), _RED_BGR, _DK
 macroDownBtn.OnEvent("Click", MacroMoveDown)
 
 MainGui.SetFont("s8 c888888 Italic", "Segoe UI")
-MainGui.Add("Text", "x12 y278 w425 h14 Center", "F3/Start to arm  |  F at inventory  |  Q: single/swap  |  Z: next/exit")
+global mfHintLabel := MainGui.Add("Text", "x12 y278 w425 h14 Center", "F3/Start to arm  |  " StrUpper(pcAccessKey) " at inventory  |  Q: single/swap  |  Z: next/exit")
 MainGui.Add("Text", "x12 y294 w425 h14 Center", "F1 = Stop / UI  |  Only ► macro hotkey is live  |  ? for full help")
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2033,12 +2040,47 @@ global sheepAutoLvlActive := false
 global sheepModeActive    := false
 SheepHideAutoLvlGui()
 PcLog("Script start: reset Sheep auto-level to off")
+
+try {
+    _sToggle  := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "ToggleKey", "")
+    _sOvercap := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "OvercapKey", "")
+    _sInvKey  := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "InventoryKey", "")
+    _sAutoLvl := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "AutoLvlKey", "")
+    if (_sToggle != "") {
+        global sheepToggleKey := _sToggle
+        try sheepToggleInput.Value := _sToggle
+    }
+    if (_sOvercap != "") {
+        global sheepOvercapKey := _sOvercap
+        try sheepOvercapInput.Value := _sOvercap
+    }
+    if (_sInvKey != "") {
+        global sheepInventoryKey := _sInvKey
+        try sheepInventoryInput.Value := _sInvKey
+    }
+    if (_sAutoLvl != "") {
+        global sheepAutoLvlKey     := _sAutoLvl
+        global sheepLevelActionKey := _sAutoLvl
+        try sheepAutoLvlInput.Value := _sAutoLvl
+    }
+    PcLog("Sheep keys loaded: toggle=" sheepToggleKey " overcap=" sheepOvercapKey " inv=" sheepInventoryKey " autoLvl=" sheepAutoLvlKey)
+}
+
 OvercapUpdateStatus()
 PcApplySpeed()
 PcRegisterSpeedHotkeys(false)
 
 try {
+    savedAccessKey := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "AccessKey", "")
+    if (savedAccessKey != "") {
+        global pcAccessKey := savedAccessKey
+        try obF6Label.Text := " F6 — Fill OB  (" StrUpper(pcAccessKey) " to upload)"
+        try pcStatusTxt.Text := "Select a mode then press " StrUpper(pcAccessKey) " at an inventory"
+        try mfHintLabel.Text := "F3/Start to arm  |  " StrUpper(pcAccessKey) " at inventory  |  Q: single/swap  |  Z: next/exit"
+    }
     savedInvKey  := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey",  "")
+    if (savedInvKey = "")
+        savedInvKey := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "InventoryKey", "")
     savedDropKey := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
     if (savedInvKey  != "") {
         pcInvKey  := savedInvKey
@@ -2066,6 +2108,7 @@ try {
     }
 }
 
+PcRegisterInvHotkey()
 LoadHatchSettings()
 PinLoadSettings()
 PcUpdateUI()
@@ -2176,7 +2219,7 @@ OnTabChange(ctrl, *) {
         if (runMagicFScript) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
-            try Hotkey("$z", "Off")
+            SafeDisableZ()
             if (!macroPlaying)
                 ToolTip()
         }
@@ -2500,7 +2543,7 @@ NsShowHelp(*) {
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y73 w305",
         "All: hatches every egg  |  Single: hatches one at a time`n"
-        . "F at inventory to hatch")
+        . StrUpper(pcAccessKey) " at inventory to hatch")
 
     nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y113 w305", "Claim/Name")
@@ -2517,7 +2560,7 @@ NsShowHelp(*) {
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y213 w305",
         "Select a hatch mode then press a name mode START`n"
-        . "F for hatching, E for naming  |  Q = Stop all")
+        . StrUpper(pcAccessKey) " for hatching, E for naming  |  Q = Stop all")
     nsHelpGui.SetFont("s9 cFFFFFF Bold", "Segoe UI")
     closeBtn := nsHelpGui.Add("Button", "x130 y+12 w110 h26", "Got it")
     closeBtn.OnEvent("Click", (*) => nsHelpGui.Destroy())
@@ -2712,7 +2755,7 @@ MagicFBuildTooltip() {
                 gList .= (i > 1 ? " + " : "") g
             tt .= "`n  Give: " gList
         }
-        tt .= "`nF at inventory  |  F1 = Stop/UI"
+        tt .= "`n" StrUpper(pcAccessKey) " at inventory  |  F1 = Stop/UI"
         return tt
     }
 
@@ -2869,9 +2912,9 @@ QuickFeedCycle(*) {
         global guiVisible := false
         if WinExist(arkwindow)
             WinActivate(arkwindow)
-        ToolTip(" Quick Feed — Raw Meat armed`nF at dino to feed  |  F3 = Berry  |  F3 again = Off", 0, 0)
+        ToolTip(" Quick Feed — Raw Meat armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Berry  |  F3 again = Off", 0, 0)
     } else if (quickFeedMode = 2) {
-        ToolTip(" Quick Feed — Berry armed`nF at dino to feed  |  F3 = Off", 0, 0)
+        ToolTip(" Quick Feed — Berry armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Off", 0, 0)
     } else {
         QuickFeedStop()
     }
@@ -2914,7 +2957,7 @@ QuickFeedFPressed() {
 
     modeStr := (quickFeedMode = 1) ? "Raw Meat" : "Berry"
     nextStr := (quickFeedMode = 1) ? "F3 = Berry" : "F3 = Off"
-    ToolTip(" Quick Feed — " modeStr " armed`nF at dino to feed  |  " nextStr, 0, 0)
+    ToolTip(" Quick Feed — " modeStr " armed`n" StrUpper(pcAccessKey) " at dino to feed  |  " nextStr, 0, 0)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -3397,7 +3440,7 @@ QhStart(*) {
         global qhArmed := true
         if (!hasDepo) {
             modeNames := Map(1, "All", 2, "Single")
-            ToolTip(" Quick Hatch — " modeNames[qhMode] "`nPress F at inventory  |  Q = Stop", 0, 0, 1)
+            ToolTip(" Quick Hatch — " modeNames[qhMode] "`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
         }
     }
 
@@ -3460,11 +3503,11 @@ DepoBuildTooltip() {
     for i, step in depoCycle {
         arrow := (i = depoCycleIdx) ? " ► " : "   "
         if (step.filter != "")
-            parts.Push(arrow "Depo " step.label " [F=give]")
+            parts.Push(arrow "Depo " step.label " [" StrUpper(pcAccessKey) "=give]")
         else {
             modeNames := Map(1, "All", 2, "Single")
             hatchTT := qhArmed ? "Hatch " modeNames[qhMode] : "Hatch"
-            parts.Push(arrow hatchTT " [F=hatch]")
+            parts.Push(arrow hatchTT " [" StrUpper(pcAccessKey) "=hatch]")
         }
     }
     tt := ""
@@ -3620,15 +3663,15 @@ QhFPressed() {
                 }
                 QhLog("Single mode — pre: " eggCount "  post: " remaining "  polls: " pollCount)
                 if (remaining > 0)
-                    ToolTip(" Single — " remaining " egg" (remaining > 1 ? "s" : "") " remaining`nPress F at inventory  |  Q = Stop", 0, 0, 1)
+                    ToolTip(" Single — " remaining " egg" (remaining > 1 ? "s" : "") " remaining`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
                 else
-                    ToolTip(" Single — inventory empty`nPress F at inventory  |  Q = Stop", 0, 0, 1)
+                    ToolTip(" Single — inventory empty`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
             }
         }
         Sleep(100)
         if (NFSearchTol(&px, &py, 1495*widthmultiplier, 226*heightmultiplier, 1490*widthmultiplier, 230*heightmultiplier, "0xFFFFFF")) {
-            ControlSend("{f}",, arkwindow)
-            QhLog("Sent F to close inventory")
+            ControlSend("{" pcAccessKey "}",, arkwindow)
+            QhLog("Sent " pcAccessKey " to close inventory")
         } else {
             QhLog("Inventory already closed — skipping close")
         }
@@ -3818,7 +3861,7 @@ GmkToggle() {
     if (gmkMode != "off") {
         if (runMagicFScript) {
             global runMagicFScript := false
-            try Hotkey("$z", "Off")
+            SafeDisableZ()
         }
         if (quickFeedMode > 0) {
             global quickFeedMode := 0
@@ -3851,7 +3894,7 @@ GmkToggle() {
 GmkBuildTooltip() {
     global gmkMode
     mLabel := (gmkMode = "take") ? "TAKE" : "GIVE"
-    action := (gmkMode = "take") ? "F = Take All" : "F = Give All"
+    action := (gmkMode = "take") ? StrUpper(pcAccessKey) " = Take All" : StrUpper(pcAccessKey) " = Give All"
     return " Grab My Kit: " mLabel "`n" action "  |  F12 = cycle  |  F1 = UI"
 }
 
@@ -3879,12 +3922,12 @@ GmkFPressed() {
         ControlClick("x" transferToMeButtonX " y" transferToMeButtonY, arkwindow)
         Sleep(100)
         if (NFSearchTol(&x, &y, 1495*widthmultiplier, 226*heightmultiplier, 1490*widthmultiplier, 230*heightmultiplier, "0xFFFFFF"))
-            Send("{f}")
+            Send("{" pcAccessKey "}")
     } else {
         ControlClick("x" transferToOtherButtonX " y" transferToOtherButtonY, arkwindow)
         Sleep(100)
         if (NFSearchTol(&x, &y, 1495*widthmultiplier, 226*heightmultiplier, 1490*widthmultiplier, 230*heightmultiplier, "0xFFFFFF"))
-            Send("{f}")
+            Send("{" pcAccessKey "}")
     }
     Sleep(100)
     busy := false
@@ -4014,7 +4057,9 @@ MacroLoadAll() {
                     m.guidedAction := gAction
                     m.guidedKey := IniRead(configFile, sec, "GuidedKey", "g")
                     m.guidedCount := Integer(IniRead(configFile, sec, "GuidedCount", "0"))
-                    m.events := RebuildGuidedEvents(gAction, m.guidedCount, m.guidedKey)
+                    m.guidedTransferMode := IniRead(configFile, sec, "GuidedTransferMode", "stack")
+                    m.guidedStackSize := Integer(IniRead(configFile, sec, "GuidedStackSize", "100"))
+                    m.events := RebuildGuidedEvents(gAction, m.guidedCount, m.guidedKey, m.guidedTransferMode)
                 } else {
                     m.guidedAction := ""
                     m.guidedKey := ""
@@ -4233,6 +4278,8 @@ MacroSaveAll() {
                 IniWrite(m.guidedAction, configFile, sec, "GuidedAction")
                 IniWrite(m.guidedKey, configFile, sec, "GuidedKey")
                 IniWrite(m.guidedCount, configFile, sec, "GuidedCount")
+                IniWrite(m.HasProp("guidedTransferMode") ? m.guidedTransferMode : "stack", configFile, sec, "GuidedTransferMode")
+                IniWrite(m.HasProp("guidedStackSize") ? m.guidedStackSize : 100, configFile, sec, "GuidedStackSize")
             } else {
                 IniWrite(m.events.Length, configFile, sec, "EventCount")
                 for j, evt in m.events {
@@ -5226,7 +5273,7 @@ MacroDisarmPopcornF() {
 
 MacroPopcornFThread(m) {
     global arkwindow, macroArmed, macroSelectedIdx, macroList, macroTabActive
-    Send("{f}")
+    Send("{" pcAccessKey "}")
     Sleep(200)
     MacroRepeatPopcornSequence(m)
     if (macroArmed && macroTabActive && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
@@ -6041,7 +6088,7 @@ MacroRegisterHotkeys(enable) {
             try Hotkey("$]", MacroSpeedDown, "On")
         }
     } else {
-        try Hotkey("$z", "Off")
+        SafeDisableZ()
         try Hotkey("$[", "Off")
         try Hotkey("$]", "Off")
     }
@@ -6159,12 +6206,12 @@ MacroShowHelp(*) {
     macroHelpGui.Add("Text", "x15 y38 w350", "CONTROLS")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
     macroHelpGui.Add("Text", "x15 y55 w350", "F3 / Start → arm selected macro")
-    macroHelpGui.Add("Text", "x15 y70 w350", "F → run at inventory  |  Q → cycle / single item")
+    macroHelpGui.Add("Text", "x15 y70 w350", StrUpper(pcAccessKey) " → run at inventory  |  Q → cycle / single item")
     macroHelpGui.Add("Text", "x15 y85 w350", "Z → next macro  |  F1 → stop & show UI")
     macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
     macroHelpGui.Add("Text", "x15 y108 w350", "COMBO (Popcorn+MagicF)")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    macroHelpGui.Add("Text", "x15 y125 w350", "F → open inv & drop  |  R → close inv")
+    macroHelpGui.Add("Text", "x15 y125 w350", StrUpper(pcAccessKey) " → open inv & drop  |  R → close inv")
     macroHelpGui.Add("Text", "x15 y140 w350", "Q → swap Popcorn ↔ MagicF  |  Z → exit")
     macroHelpGui.SetFont("s9 c888888", "Segoe UI")
     btnClose := DarkBtn(macroHelpGui, "x130 y168 w120 h26", "Close", 0xDDDDDD, _DK_BG, -12, false)
@@ -6351,21 +6398,46 @@ GuidedShowSinglePage() {
     global guidedSpTakeEdits := []
     global guidedSpTakeHints := []
 
+    ; Transfer mode radio buttons
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" fieldY " w100 h24 +0x200", "Count:"))
+    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" fieldY " w80 h24 +0x200", "Transfer:"))
+    global guidedSpStacksRadio := guidedWizGui.Add("Radio", "x100 y" fieldY " w80 h24 +Group Checked", "Stacks")
+    guidedSpTakeEdits.Push(guidedSpStacksRadio)
+    global guidedSpSingleRadio := guidedWizGui.Add("Radio", "x185 y" fieldY " w130 h24", "Single Items")
+    guidedSpTakeEdits.Push(guidedSpSingleRadio)
+    guidedSpStacksRadio.OnEvent("Click", GuidedSpTransferModeChanged)
+    guidedSpSingleRadio.OnEvent("Click", GuidedSpTransferModeChanged)
+
+    ; Count row
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+28) " w100 h24 +0x200", "Count:"))
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
-    global guidedSpCountEdit := guidedWizGui.Add("Edit", "x130 y" fieldY " w60 h24 +Number", "0")
+    global guidedSpCountEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+28) " w60 h24 +Number", "36")
     guidedSpCountEdit.OnEvent("Change", GuidedSpUpdateName)
     guidedSpTakeEdits.Push(guidedSpCountEdit)
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
-    guidedSpTakeHints.Push(guidedWizGui.Add("Text", "x195 y" (fieldY+4) " w120", "(0 = all)"))
+    global guidedSpCountHint := guidedWizGui.Add("Text", "x195 y" (fieldY+32) " w50", "(slots)")
+    guidedSpTakeHints.Push(guidedSpCountHint)
+
+    ; Stack size (visible only in Single Items mode)
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+28) " w110 h24 +0x200", "Search filter:"))
+    global guidedSpStackSizeLbl := guidedWizGui.Add("Text", "x245 y" (fieldY+28) " w42 h24 +0x200", "Stack:")
+    guidedSpStackSizeLbl.Visible := false
+    guidedSpTakeLbls.Push(guidedSpStackSizeLbl)
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
-    global guidedSpTakeFilterEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+28) " w190 h24", "")
+    global guidedSpStackSizeEdit := guidedWizGui.Add("Edit", "x289 y" (fieldY+28) " w30 h24 +Number", "100")
+    guidedSpStackSizeEdit.Visible := false
+    guidedSpTakeEdits.Push(guidedSpStackSizeEdit)
+
+    ; Search filter row
+    guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    guidedSpTakeLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+56) " w110 h24 +0x200", "Search filter:"))
+    guidedWizGui.SetFont("s9 c000000", "Segoe UI")
+    global guidedSpTakeFilterEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+56) " w190 h24", "")
+    guidedSpTakeFilterEdit.OnEvent("Change", GuidedSpUpdateName)
     guidedSpTakeEdits.Push(guidedSpTakeFilterEdit)
     guidedWizGui.SetFont("s8 c888888", "Segoe UI")
-    guidedSpTakeHints.Push(guidedWizGui.Add("Text", "x130 y" (fieldY+52) " w190", "(blank = no filter)"))
+    guidedSpTakeHints.Push(guidedWizGui.Add("Text", "x130 y" (fieldY+80) " w190", "(blank = no filter)"))
 
     global guidedSpPcLbls := []
     global guidedSpPcEdits := []
@@ -6389,6 +6461,7 @@ GuidedShowSinglePage() {
     guidedSpPcLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+56) " w110 h24 +0x200", "Search filter:"))
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedSpPcFilterEdit := guidedWizGui.Add("Edit", "x130 y" (fieldY+56) " w190 h24", "")
+    guidedSpPcFilterEdit.OnEvent("Change", GuidedSpUpdateName)
     guidedSpPcEdits.Push(guidedSpPcFilterEdit)
     guidedWizGui.SetFont("s8 c888888", "Segoe UI")
     guidedSpPcHints.Push(guidedWizGui.Add("Text", "x130 y" (fieldY+80) " w190", "(blank = no filter)"))
@@ -6452,10 +6525,12 @@ GuidedSpUpdateFields(*) {
     for , c in guidedSpPcHints
         c.Visible := isPopcorn
 
-    if (isTake)
-        bottomY := 112 + 66 + 4
-    else
+    if (isTake) {
+        GuidedSpTransferModeChanged()
+        bottomY := 112 + 94 + 4
+    } else {
         bottomY := 112 + 100 + 4
+    }
 
     guidedSpBottomSep.Move(, bottomY)
     guidedSpNameLbl.Move(, bottomY + 8)
@@ -6489,7 +6564,35 @@ GuidedSpUpdateName(*) {
         try countVal := guidedSpDropCountEdit.Value
     }
     unitStr := (countVal != "" && countVal != "0") ? " " countVal : ""
-    guidedSpNameEdit.Value := invNames[invIdx] " " actionNames[actionIdx] unitStr
+    transferSuffix := ""
+    if (isTake) {
+        try {
+            if (guidedSpSingleRadio.Value)
+                transferSuffix := " Single"
+        }
+    }
+    filterStr := ""
+    try {
+        if (isTake) {
+            fv := guidedSpTakeFilterEdit.Value
+            if (Trim(fv) != "")
+                filterStr := " " Trim(fv)
+        } else {
+            fv := guidedSpPcFilterEdit.Value
+            if (Trim(fv) != "")
+                filterStr := " " Trim(fv)
+        }
+    }
+    guidedSpNameEdit.Value := invNames[invIdx] " " actionNames[actionIdx] unitStr transferSuffix filterStr
+}
+
+GuidedSpTransferModeChanged(*) {
+    global guidedSpSingleRadio, guidedSpStackSizeLbl, guidedSpStackSizeEdit, guidedSpCountHint
+    isSingle := guidedSpSingleRadio.Value
+    guidedSpStackSizeLbl.Visible := isSingle
+    guidedSpStackSizeEdit.Visible := isSingle
+    guidedSpCountHint.Text := isSingle ? "(items)" : "(slots)"
+    GuidedSpUpdateName()
 }
 
 GuidedShowSinglePageHelp(*) {
@@ -6506,13 +6609,14 @@ GuidedShowSinglePageHelp(*) {
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
     hGui.Add("Text", "x10 y30 w280",
         "Pick inventory type and action.`n"
-        "Take: click + T each slot (transfers items).`n"
+        "Stacks: click + T each slot (transfers stacks).`n"
+        "Single Items: double-click to transfer one at a time.`n"
         "Popcorn: hover + drop key (discards items).`n"
-        "Give: player inv → other inv (skip implant).`n"
-        "Record: manually record clicks/keys.`n`n"
+        "Give: player inv → other inv (skip implant).`n`n"
+        "Count = slots (stacks) or items (single).`n"
+        "Stack = items per stack (single mode pause).`n"
         "Use search filter to target specific items.`n"
-        "Leave blank to affect all items in grid.`n"
-        "F at inventory to run. Z = next. F1 = stop.")
+        StrUpper(pcAccessKey) " at inventory to run. Z = next. F1 = stop.")
     hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
     hGui.Show("w300 h200 " MacroPopupPos(300))
 }
@@ -6548,11 +6652,15 @@ GuidedSpSave(*) {
         global guidedTakeEdit := guidedSpCountEdit
         global guidedTakeFilterEdit := guidedSpTakeFilterEdit
         global guidedTakeNameEdit := guidedSpNameEdit
+        global guidedTransferMode := guidedSpSingleRadio.Value ? "single" : "stack"
+        global guidedStackSize := guidedSpSingleRadio.Value ? Integer(guidedSpStackSizeEdit.Value) : 100
         GuidedTakeSave()
     } else if (guidedActionType = "give") {
         global guidedGiveEdit := guidedSpCountEdit
         global guidedGiveFilterEdit := guidedSpTakeFilterEdit
         global guidedGiveNameEdit := guidedSpNameEdit
+        global guidedTransferMode := guidedSpSingleRadio.Value ? "single" : "stack"
+        global guidedStackSize := guidedSpSingleRadio.Value ? Integer(guidedSpStackSizeEdit.Value) : 100
         GuidedGiveSave()
     } else if (guidedActionType = "popcorn") {
         global guidedPcSlotsEdit := guidedSpDropCountEdit
@@ -6739,6 +6847,7 @@ GuidedTakeSave(*) {
     global guidedWizGui, guidedInvType, guidedTakeEdit, guidedTakeFilterEdit, guidedTakeNameEdit
     global macroList, macroTabActive, macroSelectedIdx
     global pcStartSlotX, pcStartSlotY, pcSlotW, pcSlotH, pcColumns
+    global guidedTransferMode, guidedStackSize
 
     name := Trim(guidedTakeNameEdit.Value)
     if (name = "") {
@@ -6748,33 +6857,35 @@ GuidedTakeSave(*) {
     }
     slotCount := Integer(guidedTakeEdit.Value)
     if (slotCount < 1)
-        slotCount := pcColumns * 6
+        slotCount := 1
     transferKey := "t"
     filter := Trim(guidedTakeFilterEdit.Value)
 
-    gridSize := pcColumns * 6
     events := []
-    remaining := slotCount
-    while (remaining > 0) {
-        slot := 0
-        Loop 6 {
-            row := A_Index - 1
-            Loop pcColumns {
-                col := A_Index - 1
-                slot++
+    if (guidedTransferMode != "single") {
+        gridSize := pcColumns * 6
+        remaining := slotCount
+        while (remaining > 0) {
+            slot := 0
+            Loop 6 {
+                row := A_Index - 1
+                Loop pcColumns {
+                    col := A_Index - 1
+                    slot++
+                    if (slot > remaining || slot > gridSize)
+                        break
+                    x := pcStartSlotX + col * pcSlotW
+                    y := pcStartSlotY + row * pcSlotH
+                    if (events.Length > 0)
+                        events.Push({type: "M", x: x, y: y, delay: 0})
+                    events.Push({type: "C", dir: "c", btn: "L", x: x, y: y, delay: 100})
+                    events.Push({type: "K", dir: "p", key: transferKey, delay: 60})
+                }
                 if (slot > remaining || slot > gridSize)
                     break
-                x := pcStartSlotX + col * pcSlotW
-                y := pcStartSlotY + row * pcSlotH
-                if (events.Length > 0)
-                    events.Push({type: "M", x: x, y: y, delay: 0})
-                events.Push({type: "C", dir: "c", btn: "L", x: x, y: y, delay: 100})
-                events.Push({type: "K", dir: "p", key: transferKey, delay: 60})
             }
-            if (slot > remaining || slot > gridSize)
-                break
+            remaining -= Min(slot, gridSize)
         }
-        remaining -= Min(slot, gridSize)
     }
 
     m := {}
@@ -6792,6 +6903,8 @@ GuidedTakeSave(*) {
     m.guidedAction := "take"
     m.guidedKey := transferKey
     m.guidedCount := slotCount
+    m.guidedTransferMode := guidedTransferMode
+    m.guidedStackSize := guidedStackSize
     m.searchFilters := []
     if (filter != "")
         m.searchFilters.Push(filter)
@@ -6803,8 +6916,9 @@ GuidedTakeSave(*) {
     try guidedWizGui.Destroy()
     global guidedWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
-    MacroLog("GuidedTakeSave: '" name "' — " slotCount " slots, key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
-    ToolTip(" Take macro '" name "' saved! (" slotCount " slots, " events.Length " events)", 0, 0)
+    modeLabel := (guidedTransferMode = "single") ? "single" : "stacks"
+    MacroLog("GuidedTakeSave: '" name "' — " slotCount " " modeLabel ", key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
+    ToolTip(" Take macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
 
@@ -6847,6 +6961,7 @@ GuidedGiveSave(*) {
     global guidedWizGui, guidedInvType, guidedGiveEdit, guidedGiveFilterEdit, guidedGiveNameEdit
     global macroList, macroTabActive, macroSelectedIdx
     global plStartSlotX, plStartSlotY, plSlotW, plSlotH
+    global guidedTransferMode, guidedStackSize
 
     name := Trim(guidedGiveNameEdit.Value)
     if (name = "") {
@@ -6856,38 +6971,40 @@ GuidedGiveSave(*) {
     }
     slotCount := Integer(guidedGiveEdit.Value)
     if (slotCount < 1)
-        slotCount := pcColumns * 6
+        slotCount := 1
     transferKey := "t"
     filter := Trim(guidedGiveFilterEdit.Value)
     hasFilter := (filter != "")
     skipFirst := !hasFilter
 
     events := []
-    remaining := slotCount
-    while (remaining > 0) {
-        slot := 0
-        clicked := 0
-        Loop 6 {
-            row := A_Index - 1
+    if (guidedTransferMode != "single") {
+        remaining := slotCount
+        while (remaining > 0) {
+            slot := 0
+            clicked := 0
             Loop 6 {
-                col := A_Index - 1
-                slot++
-                if (skipFirst && slot = 1)
-                    continue
+                row := A_Index - 1
+                Loop 6 {
+                    col := A_Index - 1
+                    slot++
+                    if (skipFirst && slot = 1)
+                        continue
+                    if (clicked >= remaining)
+                        break
+                    x := plStartSlotX + col * plSlotW
+                    y := plStartSlotY + row * plSlotH
+                    if (events.Length > 0)
+                        events.Push({type: "M", x: x, y: y, delay: 0})
+                    events.Push({type: "C", dir: "c", btn: "L", x: x, y: y, delay: 100})
+                    events.Push({type: "K", dir: "p", key: transferKey, delay: 60})
+                    clicked++
+                }
                 if (clicked >= remaining)
                     break
-                x := plStartSlotX + col * plSlotW
-                y := plStartSlotY + row * plSlotH
-                if (events.Length > 0)
-                    events.Push({type: "M", x: x, y: y, delay: 0})
-                events.Push({type: "C", dir: "c", btn: "L", x: x, y: y, delay: 100})
-                events.Push({type: "K", dir: "p", key: transferKey, delay: 60})
-                clicked++
             }
-            if (clicked >= remaining)
-                break
+            remaining -= clicked
         }
-        remaining -= clicked
     }
 
     m := {}
@@ -6906,6 +7023,8 @@ GuidedGiveSave(*) {
     m.guidedAction := "give"
     m.guidedKey := transferKey
     m.guidedCount := slotCount
+    m.guidedTransferMode := guidedTransferMode
+    m.guidedStackSize := guidedStackSize
     m.searchFilters := []
     if (filter != "")
         m.searchFilters.Push(filter)
@@ -6917,8 +7036,9 @@ GuidedGiveSave(*) {
     try guidedWizGui.Destroy()
     global guidedWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
-    MacroLog("GuidedGiveSave: '" name "' — " slotCount " slots, key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " skipFirst=" skipFirst " events=" events.Length)
-    ToolTip(" Give macro '" name "' saved! (" slotCount " slots, " events.Length " events)", 0, 0)
+    modeLabel := (guidedTransferMode = "single") ? "single" : "stacks"
+    MacroLog("GuidedGiveSave: '" name "' — " slotCount " " modeLabel ", key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " skipFirst=" skipFirst " events=" events.Length)
+    ToolTip(" Give macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
     SetTimer(() => ToolTip(), -3000)
 }
 
@@ -7143,7 +7263,7 @@ GuidedShowStep4() {
     filterLabel := guidedFilters.Length > 0 ? guidedFilters.Length " filter(s)" : "no filter"
     guidedWizGui.Add("Text", "x15 y45 w340", "Inventory: " invLabel "  |  " filterLabel)
     guidedWizGui.Add("Text", "x15 y70 w340", "1) Click Start — we will activate ARK for you")
-    guidedWizGui.Add("Text", "x15 y90 w340", "2) Press F to open inventory, then do your actions")
+    guidedWizGui.Add("Text", "x15 y90 w340", "2) Press " StrUpper(pcAccessKey) " to open inventory, then do your actions")
     guidedWizGui.Add("Text", "x15 y110 w340", "3) Press F1 when done recording")
     guidedWizGui.SetFont("s8 c888888 Italic", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y135 w340", "We auto-strip the F open/close and mouse travel.")
@@ -7405,7 +7525,7 @@ GuidedShowSaveDialog() {
     guidedWizGui.SetFont("s9 c000000", "Segoe UI")
     global guidedNameEdit := guidedWizGui.Add("Edit", "x75 y62 w200 h24", "")
     guidedWizGui.SetFont("s9 c888888 Italic", "Segoe UI")
-    guidedWizGui.Add("Text", "x15 y92 w300", "Trigger: F at inventory (auto — no hotkey needed)")
+    guidedWizGui.Add("Text", "x15 y92 w300", "Trigger: " StrUpper(pcAccessKey) " at inventory (auto — no hotkey needed)")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     global guidedLoopChk := guidedWizGui.Add("CheckBox", "x15 y114 w55 h24", "Loop")
     global guidedTurboChk := guidedWizGui.Add("CheckBox", "x75 y114 w65 h24 Checked", "Turbo")
@@ -7645,7 +7765,7 @@ GuidedPlayThread(m) {
             }
             if (!invFound) {
                 MacroLog("GuidedPlay: inventory TIMEOUT")
-                ToolTip(" Inventory not detected — press F at an inventory`n F1 = Stop", 0, 0)
+                ToolTip(" Inventory not detected — press " StrUpper(pcAccessKey) " at an inventory`n F1 = Stop", 0, 0)
                 SetTimer(() => GuidedShowArmedTooltip(m), -2000)
                 continue
             }
@@ -7688,7 +7808,17 @@ GuidedPlayThread(m) {
             } else {
             }
 
-            if (m.HasProp("popcornAll") && m.popcornAll && m.events.Length = 0) {
+            transferMode := m.HasProp("guidedTransferMode") ? m.guidedTransferMode : "stack"
+            if (transferMode = "single") {
+                if (guidedSingleItem) {
+                    MacroLog("GuidedPlay: single-item mode (Q=1 item)")
+                    GuidedReplaySingleItemOnce(m, mouseSpd)
+                } else {
+                    MacroLog("GuidedPlay: single-item mode (" m.guidedCount " items)")
+                    GuidedReplaySingleItems(m, mouseSpd)
+                }
+                MacroLog("GuidedPlay: replay done")
+            } else if (m.HasProp("popcornAll") && m.popcornAll && m.events.Length = 0) {
                 MacroLog("GuidedPlay: popcornAll — running drop loop")
                 GuidedPopcornAllLoop()
                 MacroLog("GuidedPlay: popcornAll drop loop done")
@@ -7785,6 +7915,52 @@ GuidedReplaySingle(m, mouseSpd) {
     MacroLog("GuidedReplaySingle: done — 1 item transferred")
 }
 
+GuidedReplaySingleItems(m, mouseSpd) {
+    global macroPlaying
+    global pcStartSlotX, pcStartSlotY, plStartSlotX, plStartSlotY
+    CoordMode("Mouse", "Screen")
+
+    isGive := m.HasProp("playerSearch") && m.playerSearch
+    slotX := isGive ? plStartSlotX : pcStartSlotX
+    slotY := isGive ? plStartSlotY : pcStartSlotY
+    count := m.HasProp("guidedCount") ? m.guidedCount : 1
+    stackSize := m.HasProp("guidedStackSize") ? m.guidedStackSize : 100
+    if (stackSize < 1)
+        stackSize := 100
+
+    MacroLog("GuidedSingleItems: " (isGive ? "GIVE" : "TAKE") " " count " items, stackSize=" stackSize " slot=(" slotX "," slotY ")")
+
+    MouseMove(slotX, slotY, mouseSpd)
+    Sleep(100)
+
+    Loop count {
+        if (!macroPlaying)
+            return
+        Click("2")
+        Sleep(80)
+        if (Mod(A_Index, stackSize) = 0 && A_Index < count) {
+            MacroLog("GuidedSingleItems: stack boundary at " A_Index " — waiting for refresh")
+            Sleep(400)
+        }
+    }
+    MacroLog("GuidedSingleItems: DONE " count " items")
+}
+
+GuidedReplaySingleItemOnce(m, mouseSpd) {
+    global macroPlaying
+    global pcStartSlotX, pcStartSlotY, plStartSlotX, plStartSlotY
+    CoordMode("Mouse", "Screen")
+
+    isGive := m.HasProp("playerSearch") && m.playerSearch
+    slotX := isGive ? plStartSlotX : pcStartSlotX
+    slotY := isGive ? plStartSlotY : pcStartSlotY
+
+    MouseMove(slotX, slotY, mouseSpd)
+    Sleep(50)
+    Click("2")
+    MacroLog("GuidedSingleItemOnce: 1 item at (" slotX "," slotY ")")
+}
+
 GuidedShowArmedTooltip(m) {
     global macroArmed, guidedSingleItem
     if (!macroArmed)
@@ -7806,7 +7982,12 @@ GuidedShowArmedTooltip(m) {
         }
         actionLabel := hasClicks ? "Take" : "Drop"
     }
-    modeStr := guidedSingleItem ? "SINGLE (1 item)" : actionLabel " (" m.events.Length " events)"
+    transferMode := m.HasProp("guidedTransferMode") ? m.guidedTransferMode : "stack"
+    if (transferMode = "single") {
+        modeStr := guidedSingleItem ? "SINGLE (1 item)" : "SINGLE (" m.guidedCount " items)"
+    } else {
+        modeStr := guidedSingleItem ? "SINGLE (1 slot)" : actionLabel " (" m.events.Length " events)"
+    }
     filterHint := ""
     if (filters.Length > 0) {
         filterHint := "`n Filters: "
@@ -7846,9 +8027,11 @@ GuidedApplySearchFilter(filter, usePlayerBar := false) {
     MacroLog("GuidedApplyFilter: [" filter "] applied")
 }
 
-RebuildGuidedEvents(action, count, key) {
+RebuildGuidedEvents(action, count, key, transferMode := "stack") {
     global pcStartSlotX, pcStartSlotY, pcSlotW, pcSlotH, pcColumns
     global plStartSlotX, plStartSlotY, plSlotW, plSlotH
+    if (transferMode = "single")
+        return []
     if (action = "give") {
         startX := plStartSlotX
         startY := plStartSlotY
@@ -8197,8 +8380,8 @@ ComboShowSinglePageHelp(*) {
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
     hGui.Add("Text", "x10 y30 w280",
         "Two-phase macro: Popcorn then Magic F.`n`n"
-        "Popcorn: F at inventory → drops items.`n"
-        "Magic F: F at trough → filter + give.`n"
+        "Popcorn: " StrUpper(pcAccessKey) " at inventory → drops items.`n"
+        "Magic F: " StrUpper(pcAccessKey) " at trough → filter + give.`n"
         "Q swaps between phases. Z exits.`n`n"
         "Use multiple filters separated by commas.`n"
         "Leave Popcorn empty to drop all items.`n"
@@ -8442,7 +8625,7 @@ ComboShowStep5() {
     comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Take Mode (optional)")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    comboWizGui.Add("Text", "x15 y40 w350", "F at vault → take N items → close. Set 0 to skip.")
+    comboWizGui.Add("Text", "x15 y40 w350", StrUpper(pcAccessKey) " at vault → take N items → close. Set 0 to skip.")
     comboWizGui.Add("Text", "x15 y60 w350", "Q cycles: Popcorn → Magic F → Take → Popcorn")
     comboWizGui.Add("Text", "x15 y90 w100 h24 +0x200", "Items per F:")
     comboWizGui.SetFont("s9 c000000", "Segoe UI")
@@ -9006,7 +9189,7 @@ GuidedShowEditDialog(idx) {
     macroEditGui.SetFont("s9 c000000", "Segoe UI")
     global geNameEdit := macroEditGui.Add("Edit", "x75 y62 w200 h24", m.name)
     macroEditGui.SetFont("s9 c888888 Italic", "Segoe UI")
-    macroEditGui.Add("Text", "x15 y92 w300", "Trigger: F at inventory (auto)")
+    macroEditGui.Add("Text", "x15 y92 w300", "Trigger: " StrUpper(pcAccessKey) " at inventory (auto)")
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
     global geLoopChk := macroEditGui.Add("CheckBox", "x15 y114 w55 h24 " (m.loopEnabled ? "Checked" : ""), "Loop")
     global geTurboChk := macroEditGui.Add("CheckBox", "x75 y114 w65 h24 " ((m.HasProp("turbo") && m.turbo) ? "Checked" : ""), "Turbo")
@@ -9032,13 +9215,37 @@ GuidedShowEditDialog(idx) {
     global geLoadEdit := macroEditGui.Add("Edit", "x125 y170 w50 h24 +Number", String(m.HasProp("invLoadDelay") ? m.invLoadDelay : 1500))
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
     macroEditGui.Add("Text", "x180 y174 w130", "wait for slots to populate")
-    geRerecordBtn := DarkBtn(macroEditGui, "x15 y202 w140 h28", "Re-record Actions", _RED_BGR, _DK_BG, -12, true)
+    ; Transfer mode (only for take/give actions)
+    curMode := m.HasProp("guidedTransferMode") ? m.guidedTransferMode : "stack"
+    curStackSz := m.HasProp("guidedStackSize") ? m.guidedStackSize : 100
+    gAction := m.HasProp("guidedAction") ? m.guidedAction : ""
+    isTakeOrGive := (gAction = "take" || gAction = "give")
+    macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global geTransferLbl := macroEditGui.Add("Text", "x15 y198 w70 h24 +0x200", "Transfer:")
+    global geStacksRadio := macroEditGui.Add("Radio", "x88 y198 w70 h24 +Group " (curMode != "single" ? "Checked" : ""), "Stacks")
+    global geSingleRadio := macroEditGui.Add("Radio", "x162 y198 w90 h24 " (curMode = "single" ? "Checked" : ""), "Single")
+    macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
+    global geStackSzLbl := macroEditGui.Add("Text", "x255 y198 w35 h24 +0x200", "Stack:")
+    macroEditGui.SetFont("s9 c000000", "Segoe UI")
+    global geStackSzEdit := macroEditGui.Add("Edit", "x292 y198 w30 h24 +Number", String(curStackSz))
+    geStackSzLbl.Visible := (curMode = "single")
+    geStackSzEdit.Visible := (curMode = "single")
+    geStacksRadio.OnEvent("Click", (*) => (geStackSzLbl.Visible := false, geStackSzEdit.Visible := false))
+    geSingleRadio.OnEvent("Click", (*) => (geStackSzLbl.Visible := true, geStackSzEdit.Visible := true))
+    if (!isTakeOrGive) {
+        geTransferLbl.Visible := false
+        geStacksRadio.Visible := false
+        geSingleRadio.Visible := false
+        geStackSzLbl.Visible := false
+        geStackSzEdit.Visible := false
+    }
+    geRerecordBtn := DarkBtn(macroEditGui, "x15 y230 w140 h28", "Re-record Actions", _RED_BGR, _DK_BG, -12, true)
     geRerecordBtn.OnEvent("Click", GuidedReRecord.Bind(idx))
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
-    macroEditGui.Add("Text", "x160 y208 w150", "keeps settings, new recording")
-    geSaveBtn := DarkBtn(macroEditGui, "x15 y238 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
+    macroEditGui.Add("Text", "x160 y236 w150", "keeps settings, new recording")
+    geSaveBtn := DarkBtn(macroEditGui, "x15 y266 w100 h28", "Save", _RED_BGR, _DK_BG, -12, true)
     geSaveBtn.OnEvent("Click", GuidedEditSave.Bind(idx))
-    geCancelBtn := DarkBtn(macroEditGui, "x120 y238 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
+    geCancelBtn := DarkBtn(macroEditGui, "x120 y266 w100 h28", "Cancel", 0xDDDDDD, _DK_BG, -12, false)
     geCancelBtn.OnEvent("Click", (*) => GuidedEditClose())
     macroEditGui.OnEvent("Close", (*) => GuidedEditClose())
     macroEditGui.Show("AutoSize " MacroPopupPos(350))
@@ -9330,7 +9537,7 @@ GuidedReRecordStop() {
     MacroUpdateListView()
     global guidedRecordEvents := []
     MacroLog("GuidedReRecord: replaced " oldCount " → " m.events.Length " events for '" m.name "'")
-    ToolTip(" Re-recorded '" m.name "' — " m.events.Length " events (was " oldCount ")`n F1 = Show UI  |  F at inventory = run", 0, 0)
+    ToolTip(" Re-recorded '" m.name "' — " m.events.Length " events (was " oldCount ")`n F1 = Show UI  |  " StrUpper(pcAccessKey) " at inventory = run", 0, 0)
     SetTimer(() => ToolTip(), -4000)
     global macroSelectedIdx := idx
     global macroArmed := true
@@ -9348,6 +9555,7 @@ GuidedEditSave(idx, *) {
     global macroList, macroEditGui, macroTabActive
     global geNameEdit, geLoopChk, geMouseEdit, geSettleEdit, geLoadEdit
     global geTurboChk, geTurboEdit
+    global geStacksRadio, geSingleRadio, geStackSzEdit
     m := macroList[idx]
     name := Trim(geNameEdit.Value)
     if (name = "") {
@@ -9363,6 +9571,14 @@ GuidedEditSave(idx, *) {
     m.mouseSpeed := Integer(geMouseEdit.Value)
     m.mouseSettle := Integer(geSettleEdit.Value)
     m.invLoadDelay := Integer(geLoadEdit.Value)
+    gAction := m.HasProp("guidedAction") ? m.guidedAction : ""
+    if (gAction = "take" || gAction = "give") {
+        newMode := geSingleRadio.Value ? "single" : "stack"
+        m.guidedTransferMode := newMode
+        m.guidedStackSize := Integer(geStackSzEdit.Value)
+        if (m.HasProp("guidedCount") && m.guidedCount > 0)
+            m.events := RebuildGuidedEvents(gAction, m.guidedCount, m.HasProp("guidedKey") ? m.guidedKey : "t", newMode)
+    }
     macroList[idx] := m
     MacroSaveAll()
     MacroUpdateListView()
@@ -10106,6 +10322,13 @@ SheepDetectKey(ctrl, *) {
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+SafeDisableZ() {
+    global sheepTabActive, sheepAutoLvlKey
+    try Hotkey("$z", "Off")
+    if (sheepTabActive && sheepAutoLvlKey = "z")
+        try Hotkey("$z", SheepHotkeyAutoLvl, "On")
+}
+
 SheepRegisterHotkeys() {
     global sheepToggleKey, sheepOvercapKey, sheepAutoLvlKey
     try Hotkey("$" sheepToggleKey,  SheepHotkeyToggle,  "On")
@@ -10121,16 +10344,24 @@ SheepUnregisterHotkeys() {
 }
 
 SheepHotkeyToggle(thisHotkey) {
-    global sheepTabActive, arkWindow
-    if (!sheepTabActive || !WinActive(arkWindow)) {
+    global sheepTabActive, sheepRunning, arkWindow
+    if (!sheepTabActive) {
+        Send("{" SubStr(thisHotkey, 2) "}")
+        return
+    }
+    if (!sheepRunning && !WinActive(arkWindow)) {
         Send("{" SubStr(thisHotkey, 2) "}")
         return
     }
     SheepToggleScript()
 }
 SheepHotkeyOvercap(thisHotkey) {
-    global sheepTabActive, arkWindow
-    if (!sheepTabActive || !WinActive(arkWindow)) {
+    global sheepTabActive, sheepRunning, arkWindow
+    if (!sheepTabActive) {
+        Send("{" SubStr(thisHotkey, 2) "}")
+        return
+    }
+    if (!sheepRunning && !WinActive(arkWindow)) {
         Send("{" SubStr(thisHotkey, 2) "}")
         return
     }
@@ -10141,7 +10372,11 @@ SheepHotkeyAutoLvl(thisHotkey) {
     global sheepLevelActionKey, sheepAutoLvlKey, ModeSelectTab
     arkActive := WinActive(arkWindow)
     PcLog("Sheep Z pressed: tabActive=" sheepTabActive " arkActive=" arkActive " autoLvl=" sheepAutoLvlActive " modeActive=" sheepModeActive " — " (arkActive ? "toggling" : "typing z"))
-    if (!arkActive || (!sheepTabActive && !sheepModeActive)) {
+    if (!sheepTabActive && !sheepModeActive && !sheepAutoLvlActive) {
+        Send("{" SubStr(thisHotkey, 2) "}")
+        return
+    }
+    if (!arkActive && !sheepAutoLvlActive && !sheepModeActive) {
         Send("{" SubStr(thisHotkey, 2) "}")
         return
     }
@@ -10153,7 +10388,6 @@ SheepHotkeyAutoLvl(thisHotkey) {
         if (guiVisible) {
             MainGui.Hide()
             global guiVisible := false
-            PcLog("SheepAutoLvl: hid main GUI")
         }
         try {
             SheepShowAutoLvlGui()
@@ -10173,12 +10407,6 @@ SheepHotkeyAutoLvl(thisHotkey) {
         if (sheepLevelActionKey != sheepAutoLvlKey)
             try Hotkey("$" sheepLevelActionKey, "Off")
         SheepHideAutoLvlGui()
-        if (!guiVisible) {
-            MainGui.Show("NoActivate")
-            global guiVisible := true
-            try ModeSelectTab.Value := 5
-            PcLog("SheepAutoLvl: showed main GUI on Sheep tab")
-        }
         if WinExist(arkWindow) {
             WinActivate(arkWindow)
             Sleep(100)
@@ -10211,12 +10439,21 @@ SheepApplyKeys(ctrl, info) {
 
     SheepUnregisterHotkeys()
 
-    global sheepToggleKey    := newToggle
-    global sheepOvercapKey   := newOvercap
-    global sheepInventoryKey := newInventory
-    global sheepAutoLvlKey   := newAutoLvl
+    global sheepToggleKey      := newToggle
+    global sheepOvercapKey     := newOvercap
+    global sheepInventoryKey   := newInventory
+    global sheepAutoLvlKey     := newAutoLvl
+    global sheepLevelActionKey := newAutoLvl
 
     SheepRegisterHotkeys()
+
+    configFile := A_ScriptDir "\AIO_config.ini"
+    IniWrite(sheepToggleKey,    configFile, "Sheep", "ToggleKey")
+    IniWrite(sheepOvercapKey,   configFile, "Sheep", "OvercapKey")
+    IniWrite(sheepInventoryKey, configFile, "Sheep", "InventoryKey")
+    IniWrite(sheepInventoryKey, configFile, "Popcorn", "InvKey")
+    global pcInvKey := sheepInventoryKey
+    IniWrite(sheepAutoLvlKey,   configFile, "Sheep", "AutoLvlKey")
 
     ToolTip("Sheep settings saved!`nStart/Pause: " sheepToggleKey
         "`nOvercap: " sheepOvercapKey
@@ -10257,8 +10494,15 @@ SheepToggleScript() {
 
 SheepStopScript() {
     global sheepRunning := false
-    global MainGui, guiVisible
+    global sheepBgHeld
+    global MainGui, guiVisible, arkWindow
     Click("Up")
+    hwnd := WinExist(arkWindow)
+    if (hwnd) {
+        childHwnd := SheepGetChildHwnd(hwnd)
+        SheepBgMouseUp(childHwnd)
+        global sheepBgHeld := false
+    }
     Sleep(200)
     SheepDropAll(true)
     SheepHideStatusGui()
@@ -10289,8 +10533,10 @@ SheepToggleAutoLvl() {
     if (sheepAutoLvlActive) {
         if (sheepLevelActionKey != sheepAutoLvlKey)
             Hotkey("$" sheepLevelActionKey, SheepDoAutoLevel, "On")
-        MainGui.Hide()
-        global guiVisible := false
+        if (guiVisible) {
+            MainGui.Hide()
+            global guiVisible := false
+        }
         SheepShowAutoLvlGui()
         if WinExist(arkWindow)
             WinActivate(arkWindow)
@@ -10300,8 +10546,6 @@ SheepToggleAutoLvl() {
         if (sheepLevelActionKey != sheepAutoLvlKey)
             try Hotkey("$" sheepLevelActionKey, "Off")
         SheepHideAutoLvlGui()
-        MainGui.Show("NoActivate")
-        global guiVisible := true
         if WinExist(arkWindow)
             WinActivate(arkWindow)
     }
@@ -10315,8 +10559,6 @@ SheepStopAutoLvl() {
         try Hotkey("$" sheepLevelActionKey, "Off")
     SheepHideAutoLvlGui()
     ToolTip()
-    MainGui.Show("NoActivate")
-    global guiVisible := true
     if WinExist(arkWindow)
         WinActivate(arkWindow)
 }
@@ -10398,7 +10640,7 @@ SheepShowAutoLvlGui() {
     if (sheepAutoLvlGui != "")
         try sheepAutoLvlGui.Destroy()
 
-    sheepAutoLvlGui := Gui("+AlwaysOnTop -Caption", "SheepAutoLvL")
+    sheepAutoLvlGui := Gui("+AlwaysOnTop -Caption +E0x08000000", "SheepAutoLvL")
     sheepAutoLvlGui.BackColor := "1A1A1A"
 
     sheepAutoLvlGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
@@ -10445,19 +10687,17 @@ SheepShowStatusGui() {
     if (sheepStatusGui != "")
         try sheepStatusGui.Destroy()
 
-    sheepStatusGui := Gui("+AlwaysOnTop -Caption", "SheepStatus")
+    sheepStatusGui := Gui("+AlwaysOnTop -Caption +E0x08000000", "SheepStatus")
     sheepStatusGui.BackColor := "1A1A1A"
 
     sheepStatusGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
-    sheepStatusGui.Add("Text", "x8 y8 w115", "🐑 SheepV2 Running")
+    sheepStatusGui.Add("Text", "x8 y8 w210", "🐑 SheepV2 Running")
 
     sheepStatusGui.SetFont("s9 c00FF00", "Segoe UI")
-    sheepStatusGui.Add("Text", "x8 y+6 w115", "Start/Pause: " sheepToggleKey)
-
-    sheepStatusGui.SetFont("s8 cFF4444 Italic", "Segoe UI")
+    sheepStatusGui.Add("Text", "x8 y+6 w210", StrUpper(sheepToggleKey) " = Pause  |  F1 = Stop/UI")
 
     sheepStatusGui.SetFont("s8 c888888", "Segoe UI")
-    sheepStatusGui.Add("Text", "x8 y+5 w100", "Res: " sx "x" sy)
+    sheepStatusGui.Add("Text", "x8 y+5 w210", "Clears inv on pause  |  Res: " sx "x" sy)
 
     sheepStatusGui.Show("x-9999 y-9999 AutoSize NoActivate")
     sheepStatusGui.GetPos(,, &guiW, &guiH)
@@ -10484,36 +10724,150 @@ SheepHideStatusGui() {
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+SheepBgMouseDown(childHwnd) {
+    PostMessage(0x0201, 0x0001, (1 << 16) | 1,, "ahk_id " childHwnd)
+}
+
+SheepBgMouseUp(childHwnd) {
+    PostMessage(0x0202, 0, (1 << 16) | 1,, "ahk_id " childHwnd)
+}
+
+SheepBgPxGet(hwnd, x, y) {
+    cap := CaptureWindow("ahk_id " hwnd)
+    if (!cap)
+        return {r: 0, g: 0, b: 0}
+    c := DllCall("GetPixel", "Ptr", cap.dc, "Int", x, "Int", y, "UInt")
+    ReleaseCapture(cap)
+    if (c = -1)
+        return {r: 0, g: 0, b: 0}
+    return {r: c & 0xFF, g: (c >> 8) & 0xFF, b: (c >> 16) & 0xFF}
+}
+
+SheepBgIsBlack(hwnd, x, y) {
+    px := SheepBgPxGet(hwnd, x, y)
+    return (px.r < 15 && px.g < 15 && px.b < 15)
+}
+
+SheepBgIsBright(hwnd, x, y, threshold := 200) {
+    px := SheepBgPxGet(hwnd, x, y)
+    return (px.r > threshold && px.g > threshold && px.b > threshold)
+}
+
+SheepGetChildHwnd(hwnd) {
+    bestChild := hwnd
+    pRect := Buffer(16, 0)
+    DllCall("GetClientRect", "Ptr", hwnd, "Ptr", pRect)
+    pw := NumGet(pRect, 8, "Int")
+    ph := NumGet(pRect, 12, "Int")
+    callback := CallbackCreate(_SheepEnumChild.Bind(&bestChild, pw, ph))
+    DllCall("EnumChildWindows", "Ptr", hwnd, "Ptr", callback, "Ptr", 0)
+    CallbackFree(callback)
+    return bestChild
+}
+
+_SheepEnumChild(&bestChild, pw, ph, childHwnd, lParam) {
+    cRect := Buffer(16, 0)
+    DllCall("GetClientRect", "Ptr", childHwnd, "Ptr", cRect)
+    cw := NumGet(cRect, 8, "Int")
+    ch := NumGet(cRect, 12, "Int")
+    if (cw >= pw - 20 && ch >= ph - 20)
+        bestChild := childHwnd
+    return true
+}
+
 SheepStartLoop() {
     global overcappingToggle, blackBoxX, blackBoxY
     global overcapBoxX, overcapBoxY, sheepRunning, arkWindow
+    global sheepBgHeld
 
-    if WinExist(arkWindow)
-        WinActivate(arkWindow)
+    hwnd := WinExist(arkWindow)
+    if (!hwnd)
+        return
+    childHwnd := SheepGetChildHwnd(hwnd)
+    global sheepBgHeld := false
+    fgHeld := false
+    arkWasActive := WinActive(arkWindow) ? true : false
+    userHasControl := false
     Sleep(150)
 
     Loop {
         if (!sheepRunning) {
-            Click("Up")
+            if (sheepBgHeld) {
+                SheepBgMouseUp(childHwnd)
+                global sheepBgHeld := false
+            }
+            if (fgHeld) {
+                Click("Up")
+                fgHeld := false
+            }
             return
         }
-        Click("Down")
+        arkIsActive := WinActive(arkWindow) ? true : false
+        if (arkIsActive && !arkWasActive) {
+            if (sheepBgHeld) {
+                SheepBgMouseUp(childHwnd)
+                global sheepBgHeld := false
+            }
+            userHasControl := true
+        }
+        if (!arkIsActive && arkWasActive) {
+            if (fgHeld) {
+                Click("Up")
+                fgHeld := false
+            }
+            userHasControl := false
+        }
+        arkWasActive := arkIsActive
+
+        if (userHasControl) {
+            Sleep(100)
+            continue
+        }
+
         checkX := overcappingToggle ? overcapBoxX : blackBoxX
         checkY := overcappingToggle ? overcapBoxY : blackBoxY
-        ColorBB := PxGet(checkX, checkY)
-        if (ColorBB == "0x000000") {
-            Click("Up")
+
+        if (arkIsActive) {
+            Click("Down")
+            fgHeld := true
+            color := PixelGetColor(checkX, checkY)
+            r := (color >> 16) & 0xFF
+            g := (color >> 8)  & 0xFF
+            b := color & 0xFF
+            isBlack := (r < 15 && g < 15 && b < 15)
+        } else {
+            SheepBgMouseDown(childHwnd)
+            global sheepBgHeld := true
+            isBlack := SheepBgIsBlack(hwnd, checkX, checkY)
+        }
+
+        if (isBlack) {
+            if (fgHeld) {
+                Click("Up")
+                fgHeld := false
+            }
+            if (sheepBgHeld) {
+                SheepBgMouseUp(childHwnd)
+                global sheepBgHeld := false
+            }
             Sleep(500)
             if (!sheepRunning)
                 return
             SheepDropAll()
             Loop {
-                if (!sheepRunning) {
-                    Click("Up")
+                if (!sheepRunning)
                     return
-                }
                 Sleep(200)
-                if (NFNotBlack(checkX, checkY))
+                if (WinActive(arkWindow)) {
+                    color := PixelGetColor(checkX, checkY)
+                    cr := (color >> 16) & 0xFF
+                    cg := (color >> 8)  & 0xFF
+                    cb := color & 0xFF
+                } else {
+                    px := SheepBgPxGet(hwnd, checkX, checkY)
+                    cr := px.r, cg := px.g, cb := px.b
+                }
+                if (!(cr < 15 && cg < 15 && cb < 15))
                     break
             }
             Sleep(500)
@@ -10529,12 +10883,15 @@ SheepStartLoop() {
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 SheepWaitForInventory(isFinalDrop := false) {
-    global sheepRunning, invyDetectX, invyDetectY
+    global sheepRunning, invyDetectX, invyDetectY, arkWindow
+    hwnd := WinExist(arkWindow)
+    if (!hwnd)
+        return false
     waitCount := 0
     Loop {
         if (!sheepRunning && !isFinalDrop)
             return false
-        if (NFIsBright(invyDetectX, invyDetectY)) {
+        if (SheepBgIsBright(hwnd, invyDetectX, invyDetectY)) {
             return true
         }
         Sleep(50)
@@ -10546,35 +10903,29 @@ SheepWaitForInventory(isFinalDrop := false) {
 }
 
 SheepDropAll(isFinalDrop := false) {
-    global sheepInventoryKey, sheepRunning
+    global sheepInventoryKey, sheepRunning, arkWindow
     if (!sheepRunning && !isFinalDrop)
         return
-    Send("{" sheepInventoryKey "}")
+    hwnd := WinExist(arkWindow)
+    if (!hwnd)
+        return
+    ControlSend("{" sheepInventoryKey "}",, "ahk_id " hwnd)
     if (!SheepWaitForInventory(isFinalDrop))
         return
-    SheepClickInventorySearch()
+    SetControlDelay(-1)
+    ControlClick("x" invySearchX " y" invySearchY, "ahk_id " hwnd,,,, "NA Pos")
     Sleep(300)
     if (!sheepRunning && !isFinalDrop)
         return
-    Send("t")
+    ControlSend("t",, "ahk_id " hwnd)
     Sleep(200)
-    SheepClickDropAll()
+    ControlClick("x" dropAllX " y" dropAllY, "ahk_id " hwnd,,,, "NA Pos")
     Sleep(150)
-    Send("{" sheepInventoryKey "}")
+    ControlSend("{" sheepInventoryKey "}",, "ahk_id " hwnd)
     Sleep(150)
 }
 
-SheepClickDropAll() {
-    global dropAllX, dropAllY
-    MouseMove(dropAllX, dropAllY)
-    Click()
-}
-
-SheepClickInventorySearch() {
-    global invySearchX, invySearchY
-    MouseMove(invySearchX, invySearchY)
-    Click()
-}
+; SheepClickDropAll / SheepClickInventorySearch removed — now using background ControlClick
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -10676,8 +11027,8 @@ OBWaitInvClose(reason) {
         try {
             if !NFSearchTol(&px, &py, obConfirmPixX, obConfirmPixY, obConfirmPixX, obConfirmPixY, "0xFFFFFF", 15) {
                 obLog.Push("Inv closed detected — ready for F")
-                OBSetStatus("Press F at transmitter (" modeLabel ")")
-                ToolTip(" Press F at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+                OBSetStatus("Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")")
+                ToolTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
                 return
             }
         }
@@ -10686,8 +11037,8 @@ OBWaitInvClose(reason) {
     }
     if (timeout <= 0) {
         obLog.Push("Inv close poll timed out (120s)")
-        OBSetStatus("Press F at transmitter (" modeLabel ")")
-        ToolTip(" Press F at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+        OBSetStatus("Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")")
+        ToolTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
     }
 }
 
@@ -10829,8 +11180,8 @@ OBFPressed() {
                 if (obInitFailed) {
                     global obUploadRunning := false
                     global obUploadArmed := true
-                    OBSetStatus("Not at transmitter — F to retry")
-                    ToolTip(" OB Upload [Cryos]: Not at transmitter`nF at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                    OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
+                    ToolTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                     PerfLogPush("ob_cryo", _obStart, "failed")
                     return
                 }
@@ -10849,8 +11200,8 @@ OBFPressed() {
             if (obInitFailed) {
                 global obUploadRunning := false
                 global obUploadArmed := true
-                OBSetStatus("Not at transmitter — F to retry")
-                ToolTip(" OB Upload [Cryos]: Not at transmitter`nF at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
+                ToolTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                 PerfLogPush("ob_cryo", _obStart, "failed")
                 return
             }
@@ -10904,8 +11255,8 @@ OBFPressed() {
             if (obInitFailed) {
                 global obUploadRunning := false
                 global obUploadArmed := true
-                OBSetStatus("Not at transmitter — F to retry")
-                ToolTip(" OB Upload [Tek+Cryos]: Not at transmitter`nF at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
+                ToolTip(" OB Upload [Tek+Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                 return
             }
             obLog.Push("[TEK " i "/6] result=" (found?"found items":"no items found"))
@@ -11014,9 +11365,9 @@ OBUploadCharacterThread() {
         obLog.Push("Transmitter not detected — timeout (" (waitCount * 16) "ms)")
         global obUploadArmed := true
         global obUploadRunning := false
-        OBSetStatus("Not at transmitter — F to retry")
+        OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
         OBCharRegisterSvrKeys()
-        ToolTip(" Upload Character: transmitter not detected`nF to retry  |  ↑↓ cycle  |  F6 = cycle  |  F1 = UI", 0, 0)
+        ToolTip(" Upload Character: transmitter not detected`n" StrUpper(pcAccessKey) " to retry  |  ↑↓ cycle  |  F6 = cycle  |  F1 = UI", 0, 0)
         return
     }
     obLog.Push("Transmitter detected after " (waitCount * 16) "ms  pixel=(" obConfirmPixX "," obConfirmPixY ")")
@@ -11051,8 +11402,8 @@ OBUploadCharacterThread() {
                 modeLabel := "Upload Char"
                 global obUploadRunning := false
                 global obUploadArmed := true
-                OBSetStatus("Upload timer: " tm ":" Format("{:02}", ts) " — F to manage items (" modeLabel ")")
-                ToolTip(" F to manage items  |  F1 = cancel", 0, 0)
+                OBSetStatus("Upload timer: " tm ":" Format("{:02}", ts) " — " StrUpper(pcAccessKey) " to manage items (" modeLabel ")")
+                ToolTip(" " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
                 ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
@@ -11097,8 +11448,8 @@ OBUploadCharacterThread() {
                 modeLabel := "Upload Char"
                 global obUploadRunning := false
                 global obUploadArmed := true
-                OBSetStatus("Timer " tm ":" Format("{:02}", ts) " still active — F to manage items (" modeLabel ")")
-                ToolTip(" Timer still active — F to manage items  |  F1 = cancel", 0, 0)
+                OBSetStatus("Timer " tm ":" Format("{:02}", ts) " still active — " StrUpper(pcAccessKey) " to manage items (" modeLabel ")")
+                ToolTip(" Timer still active — " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
                 ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
@@ -11286,7 +11637,7 @@ OBUploadCharacterThread() {
         global obUploadArmed := true
         global obUploadMode := 3
         global obCharTimerStage := 1
-        OBSetStatus("Items Not Allowed — F to manage items")
+        OBSetStatus("Items Not Allowed — " StrUpper(pcAccessKey) " to manage items")
         return
     }
 
@@ -11296,8 +11647,8 @@ OBUploadCharacterThread() {
         global obUploadArmed := true
         global obUploadMode := 3
         global obCharTimerStage := 0
-        OBSetStatus("Join failed — press F at transmitter to retry")
-        ToolTip(" Join failed — server not marked`n Press F at transmitter to retry", 0, 0)
+        OBSetStatus("Join failed — press " StrUpper(pcAccessKey) " at transmitter to retry")
+        ToolTip(" Join failed — server not marked`n Press " StrUpper(pcAccessKey) " at transmitter to retry", 0, 0)
         SetTimer(() => ToolTip(), -4000)
         return
     }
@@ -11354,7 +11705,7 @@ OBCharRestoreTooltip() {
             break
         }
     }
-    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  F at transmitter  |  F6 = cycle/off", 0, 0)
+    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
 }
 
 OBCharLoadServer() {
@@ -11421,7 +11772,7 @@ OBCharSvrCycle(dir) {
         nextLabel := customSvr
     note := (entry.note != "") ? " (" entry.note ")" : ""
     OBSetStatus("Upload Char → " nextLabel note)
-    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  F at transmitter  |  F6 = cycle/off", 0, 0)
+    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
 }
 
 ; ── Server List ──────────────────────────────────────────────────────────────
@@ -11891,7 +12242,7 @@ OBCheckUploadTimer(filter := "") {
         global obUploadRunning := false
         global obUploadArmed := true
         modeLabel := (obUploadMode = 1) ? "Cryos" : (obUploadMode = 2) ? "Tek+Cryos" : "Upload Char"
-        ToolTip(" Timer done — F at transmitter (" modeLabel ")`n F6 = cycle  |  F1 = UI", 0, 0)
+        ToolTip(" Timer done — " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F6 = cycle  |  F1 = UI", 0, 0)
         obLog.Push("Timer expired — re-armed (" modeLabel ")")
         return true
     }
@@ -12689,7 +13040,7 @@ OBDownloadCycle() {
 
     MainGui.Hide()
     global guiVisible := false
-    Send("{F}")
+    Send("{" pcAccessKey "}")
     OBRunDownload()
 }
 
@@ -12993,12 +13344,12 @@ OBRunDownload() {
     closeWait := 0
     loop {
         if (NFSearchTol(&X, &Y, obClosePixX, obClosePixY, obClosePixX+1, obClosePixY+1, "0xFFFFFF", 10)) {
-            ControlSend("f", , arkwindow)
+            ControlSend(pcAccessKey, , arkwindow)
             break
         }
         closeWait++
         if (closeWait > 250) {
-            ControlSend("f", , arkwindow)
+            ControlSend(pcAccessKey, , arkwindow)
             break
         }
         Sleep(20)
@@ -13269,15 +13620,19 @@ OBBarCountItems() {
     baseStart := 1025
     basePerSlot := 10.04
     scanY := obBarPixY
+    _isTeal(px) {
+        r := (px >> 16) & 0xFF
+        g := (px >> 8) & 0xFF
+        b := px & 0xFF
+        return (r < 30 && g > 100 && b > 80)
+    }
     loop 51 {
         slot := 51 - A_Index  ; 50, 49, 48... 0
         checkX := Round((baseStart + slot * basePerSlot) * widthmultiplier)
         try {
-            col := PxGet(checkX, scanY)
-            g := (col >> 8) & 0xFF
-            b := col & 0xFF
-            r := (col >> 16) & 0xFF
-            if (r < 30 && g > 100 && b > 80) {
+            if (_isTeal(PxGet(checkX, scanY))
+                || _isTeal(PxGet(checkX - 1, scanY))
+                || _isTeal(PxGet(checkX + 1, scanY))) {
                 return slot
             }
         }
@@ -14301,7 +14656,7 @@ PcExecuteBtn() {
 
     modeNames := Map(3,"Transfer")
     modeName  := modeNames.Has(pcMode) ? modeNames[pcMode] : "Popcorn"
-    PcSetStatus(modeName " — press F at an inventory")
+    PcSetStatus(modeName " — press " StrUpper(pcAccessKey) " at an inventory")
     if (pcF10Step > 0)
         ToolTip(PcBuildF10Tooltip(), 0, 0)
     else
@@ -14587,11 +14942,11 @@ PcUnifiedRun() {
         if (pcIsBag) {
             PcLog("UnifiedRun: bag stalled — skipping close")
         } else {
-            PcLog("UnifiedRun: closing inventory (stalled — pick up & depo, then F to continue)")
-            Send("{f}")
+            PcLog("UnifiedRun: closing inventory (stalled — pick up & depo, then " pcAccessKey " to continue)")
+            Send("{" pcAccessKey "}")
             Sleep(200)
         }
-        PcSetStatus("Stalled — pick up items, F to continue")
+        PcSetStatus("Stalled — pick up items, " StrUpper(pcAccessKey) " to continue")
         PcLog("UnifiedRun: STALLED")
         return
     }
@@ -14607,7 +14962,7 @@ PcUnifiedRun() {
         PcLog("UnifiedRun: bag — skipping close (auto-despawns at 0)")
     } else {
         PcLog("UnifiedRun: closing inventory")
-        Send("{f}")
+        Send("{" pcAccessKey "}")
         Sleep(200)
     }
     PcSetStatus("Done")
@@ -14640,54 +14995,71 @@ PcShowSetKeysForm() {
     formGui.BackColor := "1A1A1A"
 
     formGui.SetFont("s9 c888888", "Segoe UI")
-    formGui.Add("Text", "x20 y20 w120 h22 +0x200", "Inventory key:")
+    formGui.Add("Text", "x20 y20 w120 h22 +0x200", "Access key:")
     formGui.SetFont("s9 c000000", "Segoe UI")
-    invEdit := formGui.Add("Edit", "x148 y20 w60 h22 Center", pcInvKey)
+    accessEdit := formGui.Add("Edit", "x148 y20 w60 h22 Center", pcAccessKey)
     formGui.SetFont("s9 cFF4444", "Segoe UI")
-    btnDetectInv := formGui.Add("Button", "x218 y20 w90 h22", "Set")
+    btnDetectAccess := formGui.Add("Button", "x218 y20 w90 h22", "Set")
     formGui.SetFont("s8 c666666 Italic", "Segoe UI")
-    formGui.Add("Text", "x20 y44 w288 h16", "(will save for sheep mode)")
+    formGui.Add("Text", "x20 y44 w288 h16", "(open dino/storage inventory — default F)")
 
     formGui.SetFont("s9 c888888", "Segoe UI")
-    formGui.Add("Text", "x20 y66 w120 h22 +0x200", "Drop key:")
+    formGui.Add("Text", "x20 y66 w120 h22 +0x200", "Inventory key:")
     formGui.SetFont("s9 c000000", "Segoe UI")
-    dropEdit := formGui.Add("Edit", "x148 y66 w60 h22 Center", pcDropKey)
+    invEdit := formGui.Add("Edit", "x148 y66 w60 h22 Center", pcInvKey)
     formGui.SetFont("s9 cFF4444", "Segoe UI")
-    btnDetectDrop := formGui.Add("Button", "x218 y66 w90 h22", "Set")
+    btnDetectInv := formGui.Add("Button", "x218 y66 w90 h22", "Set")
     formGui.SetFont("s8 c666666 Italic", "Segoe UI")
-    formGui.Add("Text", "x20 y90 w288 h16", "(what you popcorn with)")
+    formGui.Add("Text", "x20 y90 w288 h16", "(your inventory — will save for sheep mode)")
+
+    formGui.SetFont("s9 c888888", "Segoe UI")
+    formGui.Add("Text", "x20 y112 w120 h22 +0x200", "Drop key:")
+    formGui.SetFont("s9 c000000", "Segoe UI")
+    dropEdit := formGui.Add("Edit", "x148 y112 w60 h22 Center", pcDropKey)
+    formGui.SetFont("s9 cFF4444", "Segoe UI")
+    btnDetectDrop := formGui.Add("Button", "x218 y112 w90 h22", "Set")
+    formGui.SetFont("s8 c666666 Italic", "Segoe UI")
+    formGui.Add("Text", "x20 y136 w288 h16", "(what you popcorn with)")
 
     formGui.SetFont("s9 cDDDDDD", "Segoe UI")
-    formGui.Add("Text", "x20 y114 w288 h16 Center", "Click Set then press a key to bind")
+    formGui.Add("Text", "x20 y160 w288 h16 Center", "Click Set then press a key to bind")
 
     formGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-    btnSave   := formGui.Add("Button", "x20  y140 w140 h28", "Save")
+    btnSave   := formGui.Add("Button", "x20  y186 w140 h28", "Save")
     formGui.SetFont("s9 c888888", "Segoe UI")
-    btnCancel := formGui.Add("Button", "x168 y140 w140 h28", "Cancel")
+    btnCancel := formGui.Add("Button", "x168 y186 w140 h28", "Cancel")
 
+    btnDetectAccess.OnEvent("Click", (*) => PcDetectKeyIntoEdit(accessEdit))
     btnDetectInv.OnEvent("Click",  (*) => PcDetectKeyIntoEdit(invEdit))
     btnDetectDrop.OnEvent("Click", (*) => PcDetectKeyIntoEdit(dropEdit))
     btnCancel.OnEvent("Click",     (*) => formGui.Destroy())
     btnSave.OnEvent("Click", PcSaveKeysFromForm)
 
-    formGui.Show("w328 h182")
+    formGui.Show("w328 h228")
 
     PcSaveKeysFromForm(*) {
         ToolTip()
-        newInv  := Trim(invEdit.Value)
-        newDrop := Trim(dropEdit.Value)
-        if (newInv = "" || newDrop = "") {
-            MsgBox("Both keys must be filled in.", "Set Keys", "OK Icon!")
+        newAccess := StrLower(Trim(accessEdit.Value))
+        newInv    := StrLower(Trim(invEdit.Value))
+        newDrop   := StrLower(Trim(dropEdit.Value))
+        if (newAccess = "" || newInv = "" || newDrop = "") {
+            MsgBox("All keys must be filled in.", "Set Keys", "OK Icon!")
             return
         }
-        global pcInvKey  := newInv
-        global pcDropKey := newDrop
+        global pcAccessKey := newAccess
+        global pcInvKey    := newInv
+        global pcDropKey   := newDrop
         global sheepInventoryKey := newInv
         try sheepInventoryInput.Value := newInv
         try pcDropKeyTxt.Text := newDrop
-        try IniWrite(newInv,  A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey")
-        try IniWrite(newDrop, A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey")
-        PcSetStatus("Keys saved   Inv=" newInv "   Drop=" newDrop)
+        try IniWrite(newAccess, A_ScriptDir "\AIO_config.ini", "Popcorn", "AccessKey")
+        try IniWrite(newInv,    A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey")
+        try IniWrite(newDrop,   A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey")
+        PcRegisterInvHotkey()
+        try obF6Label.Text := " F6 — Fill OB  (" StrUpper(pcAccessKey) " to upload)"
+        try pcStatusTxt.Text := "Select a mode then press " StrUpper(pcAccessKey) " at an inventory"
+        try mfHintLabel.Text := "F3/Start to arm  |  " StrUpper(pcAccessKey) " at inventory  |  Q: single/swap  |  Z: next/exit"
+        PcSetStatus("Keys saved   Access=" newAccess "   Inv=" newInv "   Drop=" newDrop)
         formGui.Destroy()
         ModeSelectTab.Value := 4
         MainGui.Show()
@@ -14710,7 +15082,7 @@ PcDetectKeyIntoEdit(ctrl) {
 }
 
 PcCalibrate() {
-    global pcInvKey, pcDropKey, sheepInventoryKey
+    global pcAccessKey, pcInvKey, pcDropKey, sheepInventoryKey
 
     PcWaitKey(line1, line2) {
         kwGui := Gui("+AlwaysOnTop -MinimizeBox -MaximizeBox", "Set Keys")
@@ -14737,9 +15109,19 @@ PcCalibrate() {
         return ih.EndKey
     }
 
-    ; ── Step 1: Inventory key ────────────────────────────────────────────────
+    ; ── Step 1: Access key ────────────────────────────────────────────────
+    PcSetStatus("Access a dino/storage in ARK — we'll detect the key")
+    newAccessKey := PcWaitKey("Step 1 of 3  —  Access key", "Press the key you use to open dino/storage inventory  (default F)")
+    if (newAccessKey = "") {
+        PcSetStatus("Timed out — keys unchanged")
+        MsgBox("Key detection timed out. Keys were not changed.", "Set Keys — Failed", "OK Icon!")
+        MainGui.Show()
+        return
+    }
+
+    ; ── Step 2: Inventory key ────────────────────────────────────────────────
     PcSetStatus("Open your inventory in ARK — we'll detect the key")
-    newInvKey := PcWaitKey("Step 1 of 2  —  Inventory key", "Press the key you use to open your inventory")
+    newInvKey := PcWaitKey("Step 2 of 3  —  Inventory key", "Press the key you use to open your own inventory")
     if (newInvKey = "") {
         PcSetStatus("Timed out — keys unchanged")
         MsgBox("Key detection timed out. Keys were not changed.", "Set Keys — Failed", "OK Icon!")
@@ -14747,9 +15129,9 @@ PcCalibrate() {
         return
     }
 
-    ; ── Step 2: Drop key ────────────────────────────────────────────────────
+    ; ── Step 3: Drop key ────────────────────────────────────────────────────
     PcSetStatus("Now drop any item in ARK — we'll detect the drop key")
-    newDropKey := PcWaitKey("Step 2 of 2  —  Drop key", "Press the key you use to drop items  (default G)")
+    newDropKey := PcWaitKey("Step 3 of 3  —  Drop key", "Press the key you use to drop items  (default G)")
     if (newDropKey = "") {
         PcSetStatus("Timed out — keys unchanged")
         MsgBox("Key detection timed out. Keys were not changed.", "Set Keys — Failed", "OK Icon!")
@@ -14757,8 +15139,9 @@ PcCalibrate() {
         return
     }
 
-    global pcInvKey  := newInvKey
-    global pcDropKey := newDropKey
+    global pcAccessKey := newAccessKey
+    global pcInvKey   := newInvKey
+    global pcDropKey  := newDropKey
 
     global sheepInventoryKey := pcInvKey
     try sheepInventoryInput.Value := pcInvKey
@@ -14766,11 +15149,16 @@ PcCalibrate() {
     try pcDropKeyTxt.Text := pcDropKey
 
     try {
-        IniWrite(pcInvKey,  A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey")
-        IniWrite(pcDropKey, A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey")
+        IniWrite(pcAccessKey, A_ScriptDir "\AIO_config.ini", "Popcorn", "AccessKey")
+        IniWrite(pcInvKey,    A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey")
+        IniWrite(pcDropKey,   A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey")
     }
-    PcSetStatus("Keys saved   Inv=" pcInvKey "   Drop=" pcDropKey)
-    MsgBox("Keys saved!`n`nInventory key:  " pcInvKey "`nDrop key:  " pcDropKey, "Set Keys — Saved", "OK Iconi")
+    PcRegisterInvHotkey()
+    try obF6Label.Text := " F6 — Fill OB  (" StrUpper(pcAccessKey) " to upload)"
+    try pcStatusTxt.Text := "Select a mode then press " StrUpper(pcAccessKey) " at an inventory"
+    try mfHintLabel.Text := "F3/Start to arm  |  " StrUpper(pcAccessKey) " at inventory  |  Q: single/swap  |  Z: next/exit"
+    PcSetStatus("Keys saved   Access=" pcAccessKey "   Inv=" pcInvKey "   Drop=" pcDropKey)
+    MsgBox("Keys saved!`n`nAccess key:  " pcAccessKey "`nInventory key:  " pcInvKey "`nDrop key:  " pcDropKey, "Set Keys — Saved", "OK Iconi")
     MainGui.Show()
 }
 
@@ -14921,7 +15309,7 @@ AcBuildCraftTooltip(mode) {
     cur := acPresetNames[acPresetIdx]
 
     if (acPresetNames.Length = 1)
-        return " " mode ": " cur "`nF at inventory  |  F1 = Stop"
+        return " " mode ": " cur "`n" StrUpper(pcAccessKey) " at inventory  |  F1 = Stop"
 
     nextIdx := Mod(acPresetIdx, acPresetNames.Length) + 1
     nextLabel := acPresetNames[nextIdx]
@@ -14933,7 +15321,7 @@ AcBuildCraftTooltip(mode) {
         if (i < acPresetNames.Length)
             items .= "`n"
     }
-    return " " mode ": " cur "  (Q → " nextLabel ")`n" items "`nF at inventory  |  F1 = Stop"
+    return " " mode ": " cur "  (Q → " nextLabel ")`n" items "`n" StrUpper(pcAccessKey) " at inventory  |  F1 = Stop"
 }
 
 AcGetCurrentFilter() {
@@ -14973,7 +15361,7 @@ AcDoCraftAlreadyOpen(filter) {
         Sleep(200)
         AcOcrReadStorage()
     }
-    ControlSend("{F}", , arkwindow)
+    ControlSend("{" pcAccessKey "}", , arkwindow)
     Sleep(300)
     return true
 }
@@ -15041,7 +15429,7 @@ AcDoCraft(filter) {
     global arkwindow, widthmultiplier, heightmultiplier, acGridRunning, acExtraClicks
     _acStart := A_TickCount
     CraftLog("DoCraft: sending F, filter=[" filter "]")
-    ControlSend("{F}", , arkwindow)
+    ControlSend("{" pcAccessKey "}", , arkwindow)
     if !AcWaitForInventory() {
         CraftLog("DoCraft: pixel not found — aborting +" (A_TickCount - _acStart) "ms")
         PerfLogPush("craft", _acStart, "timeout")
@@ -15070,7 +15458,7 @@ AcDoCraft(filter) {
         Sleep(200)
         AcOcrReadStorage()
     }
-    ControlSend("{F}", , arkwindow)
+    ControlSend("{" pcAccessKey "}", , arkwindow)
     Sleep(300)
     CraftLog("DoCraft: complete +" (A_TickCount - _acStart) "ms")
     PerfLogPush("craft", _acStart, "done")
@@ -15117,13 +15505,13 @@ AcDoSimpleCraft() {
         if (isMulti)
             try Hotkey("$z", AcCraftLoopZStop, "On")
         CraftLog("SimpleLoop: sending F, filter=[" filter "] multi=" isMulti)
-        ControlSend("{F}", , arkwindow)
+        ControlSend("{" pcAccessKey "}", , arkwindow)
         if !AcWaitForInventory() {
             CraftLog("SimpleLoop: inventory not found — aborting")
             global acRunning := false
             global acCraftLoopRunning := false
             if (isMulti)
-                try Hotkey("$z", "Off")
+                SafeDisableZ()
             ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
             Sleep(500)
             return
@@ -15148,11 +15536,11 @@ AcDoSimpleCraft() {
             }
             Sleep(200)
         }
-        ControlSend("{F}", , arkwindow)
+        ControlSend("{" pcAccessKey "}", , arkwindow)
         Sleep(300)
         CraftLog("SimpleLoop: stopped by " stopKey)
         if (isMulti)
-            try Hotkey("$z", "Off")
+            SafeDisableZ()
         global acRunning := false
         global acEarlyExit := false
         global acCraftLoopRunning := false
@@ -15224,13 +15612,13 @@ AcTimedLoop() {
         if (isMulti)
             try Hotkey("$z", AcCraftLoopZStop, "On")
         CraftLog("TimedLoop(loop): crafting " acActiveItemName " filter=[" acActiveFilter "] multi=" isMulti)
-        ControlSend("{F}", , arkwindow)
+        ControlSend("{" pcAccessKey "}", , arkwindow)
         if !AcWaitForInventory() {
             CraftLog("TimedLoop(loop): inventory not found — aborting")
             global acRunning := false
             global acCraftLoopRunning := false
             if (isMulti)
-                try Hotkey("$z", "Off")
+                SafeDisableZ()
             ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
             Sleep(500)
             return
@@ -15254,11 +15642,11 @@ AcTimedLoop() {
             }
             Sleep(200)
         }
-        ControlSend("{F}", , arkwindow)
+        ControlSend("{" pcAccessKey "}", , arkwindow)
         Sleep(300)
         CraftLog("TimedLoop(loop): stopped by " stopKey)
         if (isMulti)
-            try Hotkey("$z", "Off")
+            SafeDisableZ()
         global acRunning := false
         global acEarlyExit := false
         global acCraftLoopRunning := false
@@ -15314,7 +15702,7 @@ AcTimedLoop() {
             s := Mod(remaining, 60)
             status := m ":" (s < 10 ? "0" : "") s
         }
-        ToolTip("► " acActiveItemName "  " status "`nQ = Stop  |  F = Craft  |  F1 = Stop", 0, 0)
+        ToolTip("► " acActiveItemName "  " status "`nQ = Stop  |  " StrUpper(pcAccessKey) " = Craft  |  F1 = Stop", 0, 0)
         Sleep(250)
     }
 
@@ -15389,7 +15777,7 @@ AcTimedMultiLoop() {
             }
             tt .= arrow " " name "  " status "`n"
         }
-        tt .= "Q = Cycle  |  F = Craft  |  F1 = Stop"
+        tt .= "Q = Cycle  |  " StrUpper(pcAccessKey) " = Craft  |  F1 = Stop"
         ToolTip(tt, 0, 0)
 
         pollEnd := A_TickCount + 250
@@ -15655,7 +16043,7 @@ AcTallyToggle(*) {
             global acEarlyExit := true
         }
         AcOcrResetTotal()
-        ToolTip(" Count: F at each inventory  |  Count again to stop", 0, 0)
+        ToolTip(" Count: " StrUpper(pcAccessKey) " at each inventory  |  Count again to stop", 0, 0)
         SetTimer(() => ToolTip(), -3000)
     } else {
         DarkBtnText(acTallyBtn, "Count")
@@ -15921,7 +16309,7 @@ AcShowGridHelp(*) {
     acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y40 w315", "Simple Craft")
     acHelpGui.SetFont("s9 cFFFFFF", "Segoe UI")
-    acHelpGui.Add("Text", "x15 y+2 w315", "Pick preset or type filter → START → F on inventory")
+    acHelpGui.Add("Text", "x15 y+2 w315", "Pick preset or type filter → START → " StrUpper(pcAccessKey) " on inventory")
 
     acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+10 w315", "Inventory Timed")
@@ -15966,6 +16354,7 @@ AcShowGridHelp(*) {
     currentTab := ModeSelectTab.Value
     newTab := Mod(currentTab, 8) + 1
     ModeSelectTab.Value := newTab
+    OnTabChange(ModeSelectTab)
     tabNames := ["JoinSim", "Magic F", "AutoLvL", "Popcorn", "Sheep", "Craft", "Macro", "Misc"]
     ToolTip(" Tab: " tabNames[newTab], 0, 0)
     SetTimer(() => ToolTip(), -1500)
@@ -15980,6 +16369,7 @@ AcShowGridHelp(*) {
     currentTab := ModeSelectTab.Value
     newTab := Mod(currentTab - 2, 8) + 1
     ModeSelectTab.Value := newTab
+    OnTabChange(ModeSelectTab)
     tabNames := ["JoinSim", "Magic F", "AutoLvL", "Popcorn", "Sheep", "Craft", "Macro", "Misc"]
     ToolTip(" Tab: " tabNames[newTab], 0, 0)
     SetTimer(() => ToolTip(), -1500)
@@ -16029,7 +16419,7 @@ $F5:: {
 }
 
 $F3:: {
-    if (macroTabActive) {
+    if (ModeSelectTab.Value = 7) {
         MacroPlaySelected()
         return
     }
@@ -16108,7 +16498,7 @@ $F1:: {
         global magicFPresetIdx       := 1
         global gmkMode               := "off"
         try gmkStatusTxt.Text        := ""
-        try Hotkey("$z", "Off")
+        SafeDisableZ()
         global acSimpleArmed         := false
         global acTimedArmed          := false
         global acGridArmed           := false
@@ -16149,6 +16539,10 @@ $F1:: {
             StopOvercapScript()
         if (runMammothScript)
             StopMammothScript()
+        if (sheepRunning)
+            SheepStopScript()
+        if (sheepAutoLvlActive)
+            SheepStopAutoLvl()
         if (macroPlaying)
             MacroStopPlay()
         if (macroTuning) {
@@ -16160,6 +16554,7 @@ $F1:: {
         MacroDisarmPopcornF()
         MacroRegisterHotkeys(ModeSelectTab.Value = 1 || ModeSelectTab.Value = 7)
         MainGui.Show("x177 y330")
+        try ModeSelectTab.Focus()
         Sleep(100)
         MouseMove(177 + 225, 330 + 204, 0)
         ToolTip()
@@ -16186,7 +16581,7 @@ $F1:: {
                     break
                 }
             }
-            ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  F at transmitter  |  F6 = cycle/off", 0, 0)
+            ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
             OBCharRegisterSvrKeys()
             return
         }
@@ -16199,20 +16594,32 @@ $F1:: {
     }
 }
 
-~$F:: {
+PcRegisterInvHotkey() {
+    global pcAccessKey, pcInvHotkeyActive
+    newKey := "~$" StrLower(pcAccessKey)
+    if (pcInvHotkeyActive != "" && pcInvHotkeyActive != newKey) {
+        try Hotkey(pcInvHotkeyActive, "Off")
+        PcLog("InvHotkey: disabled old=" pcInvHotkeyActive)
+    }
+    Hotkey(newKey, _PcInvHotkeyHandler, "On")
+    PcLog("InvHotkey: registered new=" newKey " (was " pcInvHotkeyActive ")")
+    global pcInvHotkeyActive := newKey
+}
+
+_PcInvHotkeyHandler(thisHotkey) {
     if (!WinActive(arkwindow))
         return
     _miscActive := (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive || depoEmbryoActive)
     if (!_miscActive && macroHotkeysLive && macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
         sel := macroList[macroSelectedIdx]
-        if (sel.hotkey = "f" && sel.type != "guided" && sel.type != "combo") {
-            MacroHotkeyHandler(macroSelectedIdx, "~$f")
+        if (sel.hotkey = pcAccessKey && sel.type != "guided" && sel.type != "combo") {
+            MacroHotkeyHandler(macroSelectedIdx, thisHotkey)
             return
         }
     }
     if (!_miscActive && macroPopcornArmed && macroArmed && !macroPlaying && IsObject(macroPopcornMacro)) {
         m := macroPopcornMacro
-        MacroLog("PopcornF: F pressed — running popcorn for '" m.name "'")
+        MacroLog("PopcornF: " pcAccessKey " pressed — running popcorn for '" m.name "'")
         MacroDisarmPopcornF()
         SetTimer(MacroPopcornFThread.Bind(m), -1)
         return
@@ -16410,7 +16817,7 @@ PcBuildF10Tooltip() {
     if (!f10Names.Has(pcF10Step))
         return ""
 
-    line1 := " F10 Quick: " f10Names[pcF10Step] "  |  F at inventory  |  Q = Stop  |  F1 = Stop/UI"
+    line1 := " F10 Quick: " f10Names[pcF10Step] "  |  " StrUpper(pcAccessKey) " at inventory  |  Q = Stop  |  F1 = Stop/UI"
     line2 := "Z = Change drop speed  |  Speed: " pcSpeedNames[pcSpeedMode]
     return line1 "`n" line2
 }
@@ -16475,7 +16882,7 @@ PcRegisterSpeedHotkeys(enable) {
             try Hotkey("$]", PcHotkeyBracketRight, "On")
         }
     } else {
-        try Hotkey("$z", "Off")
+        SafeDisableZ()
         if (!autoclicking) {
             try Hotkey("$[", "Off")
             try Hotkey("$]", "Off")

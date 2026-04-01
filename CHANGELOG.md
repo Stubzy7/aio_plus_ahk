@@ -2,6 +2,20 @@
 
 ---
 
+Inventory access key is now configurable (default F)
+- Anyone who rebinds F key in ARK can set their key in Misc tab > Set Keys
+- Access key = open tame/storage inv, Inv key = your own inventory (for sheep script), Drop key = key you popcorn with
+- Every mode responds to it: popcorn, craft, magic F, macros, quick hatch, auto level, OB, GMK
+- Tooltips and labels update to show the configured key
+
+Sheep script runs fully in background
+- Can tab out of ARK and script keeps running
+- Clicking back into ARK pauses background clicks so camera works normally
+- Start/pause and F1 activate even when not clicked into ARK, set keys to something you wouldn't press by mistake on another monitor
+- Sheep keys save to INI and load on startup
+
+---
+
 Fixed Name/Spay E hold missing the radial wheel
 Fixed F key being stolen by macro popcorn when hatch or depo modes are active
 F1 now keeps hatch/claim/name/depo checkbox selections when showing UI
