@@ -9710,6 +9710,8 @@ CaptureWindow(windowTitle) {
     hwnd := WinExist(windowTitle)
     if !hwnd
         return 0
+    if DllCall("IsHungAppWindow", "Ptr", hwnd)
+        return 0
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
     if (ww <= 0 || wh <= 0)
         return 0
@@ -10739,16 +10741,18 @@ SheepBgMouseUp(childHwnd) {
 SheepBgPxGet(hwnd, x, y) {
     cap := CaptureWindow("ahk_id " hwnd)
     if (!cap)
-        return {r: 0, g: 0, b: 0}
+        return {r: -1, g: -1, b: -1}
     c := DllCall("GetPixel", "Ptr", cap.dc, "Int", x, "Int", y, "UInt")
     ReleaseCapture(cap)
     if (c = -1)
-        return {r: 0, g: 0, b: 0}
+        return {r: -1, g: -1, b: -1}
     return {r: c & 0xFF, g: (c >> 8) & 0xFF, b: (c >> 16) & 0xFF}
 }
 
 SheepBgIsBlack(hwnd, x, y) {
     px := SheepBgPxGet(hwnd, x, y)
+    if (px.r = -1)
+        return false
     return (px.r < 15 && px.g < 15 && px.b < 15)
 }
 
