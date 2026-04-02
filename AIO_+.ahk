@@ -720,6 +720,7 @@ col := {
 
 ModJoinOffsetX       := Integer(0.28125               * GameWidth)
 ModJoinOffsetY       := Integer(0.86388888888888893   * GameHeight)
+ModJoinDetectX       := Integer(0.28958333333333333   * GameWidth)
 ContentFailedOffsetX := Integer(0.53125              * GameWidth)
 ContentFailedOffsetY := Integer(0.5120570370         * GameHeight)
 WaitingToJoinOffsetX := Integer(0.8640625            * GameWidth)
@@ -783,7 +784,7 @@ states := [
     { name: "ServerBrowser",     x: ServerBrowserOffsetX, y: ServerBrowserOffsetY, c: col.ServerBrowser,
                                  calt: col.ServerBrowserAlt },
     { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu,
-                                 x2: ModJoinOffsetX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
+                                 x2: ModJoinDetectX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
     { name: "ContentFailed",     x: ContentFailedOffsetX, y: ContentFailedOffsetY, c: col.ContentFailed },
     { name: "MainMenu",          x: MainMenuJoinOffsetX,  y: MainMenuJoinOffsetY,  c: col.MainMenu },
     { name: "MiddleMenu",        x: MiddleMenuOffsetX,    y: MiddleMenuOffsetY,    c: col.MiddleMenu,
@@ -801,7 +802,7 @@ statesB := [
     { name: "ServerBrowser",     x: ServerBrowserOffsetX, y: ServerBrowserOffsetY, c: col.ServerBrowser,
                                  calt: col.ServerBrowserAlt },
     { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu,
-                                 x2: ModJoinOffsetX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
+                                 x2: ModJoinDetectX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
     { name: "MainMenu",          x: MainMenuJoinOffsetX,  y: MainMenuJoinOffsetY,  c: col.MainMenu },
     { name: "MiddleMenu",        x: MiddleMenuOffsetX,    y: MiddleMenuOffsetY,    c: col.MiddleMenu }
 ]
@@ -9770,6 +9771,8 @@ CheckState() {
     result := ""
     colorDump := ""
     for index, item in states {
+        if (item.name = "ModMenu" && !modsEnabled)
+            continue
         color := GetPixelARGB(img, item.x, item.y)
         colorDump .= item.name "=" color " "
 
@@ -9827,6 +9830,8 @@ CheckStateB() {
     result := ""
     colorDump := ""
     for index, item in statesB {
+        if (item.name = "ModMenu" && !modsEnabled)
+            continue
         color := GetPixelARGB(img, item.x, item.y)
         colorDump .= item.name "=" color " "
 
@@ -10925,7 +10930,6 @@ SheepDropAll(isFinalDrop := false) {
     Sleep(150)
 }
 
-; SheepClickDropAll / SheepClickInventorySearch removed — now using background ControlClick
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -12401,12 +12405,12 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
     Sleep(150)
     obLog.Push("[2] Filter applied: '" filter "' — search bar typed")
 
-    MouseMove(myFirstSlotX - 30, myFirstSlotY, 0)
+    MouseMove(myFirstSlotX - Round(30 * widthmultiplier), myFirstSlotY, 0)
     Sleep(60)
     MouseMove(myFirstSlotX, myFirstSlotY, 0)
     Sleep(150)
     Click
-    MouseMove(myFirstSlotX - 150, myFirstSlotY, 0)
+    MouseMove(myFirstSlotX - Round(150 * widthmultiplier), myFirstSlotY, 0)
     Sleep(150)
     obLog.Push("[3] Clicked slot 1 to defocus, moved mouse away, waiting for icon to settle")
 
@@ -12423,10 +12427,10 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
             return false
         }
         diagCol   := PxGet(obCryoPixX,       obCryoPixY)
-        diagColN  := PxGet(obCryoPixX,       obCryoPixY - 5)
-        diagColS  := PxGet(obCryoPixX,       obCryoPixY + 5)
-        diagColE  := PxGet(obCryoPixX + 5,   obCryoPixY)
-        diagColW  := PxGet(obCryoPixX - 5,   obCryoPixY)
+        diagColN  := PxGet(obCryoPixX,                                obCryoPixY - Round(5 * heightmultiplier))
+        diagColS  := PxGet(obCryoPixX,                                obCryoPixY + Round(5 * heightmultiplier))
+        diagColE  := PxGet(obCryoPixX + Round(5 * widthmultiplier),   obCryoPixY)
+        diagColW  := PxGet(obCryoPixX - Round(5 * widthmultiplier),   obCryoPixY)
         diagSlot  := PxGet(myFirstSlotX,     myFirstSlotY)
         diagInv   := PxGet(obInvPixX,         obInvPixY)
         diagTab   := PxGet(obUploadReadyPixX, obUploadReadyPixY)
@@ -12771,7 +12775,7 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
                         MouseMove(myFirstSlotX, myFirstSlotY, 0)
                         Sleep(100)
                         Click
-                        MouseMove(myFirstSlotX - 150, myFirstSlotY, 0)
+                        MouseMove(myFirstSlotX - Round(150 * widthmultiplier), myFirstSlotY, 0)
                         Sleep(300)
                         if (OBItemPresent(detectFilter)) {
                             obLog.Push("[slot#" uploadCount "] filter re-apply found items — continuing upload loop")

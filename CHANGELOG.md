@@ -2,6 +2,14 @@
 
 ---
 
+Join sim mod/event screen detection fixed
+- "Download Mod / Event" checkbox now gates detection: unchecked skips the mod screen entirely, checked detects and clicks the event JOIN button
+- Detection pixel moved off the button background onto the JOIN text
+
+OB Upload mouse offsets scaled for all resolutions
+
+---
+
 Inventory access key is now configurable (default F)
 - Anyone who rebinds F key in ARK can set their key in Misc tab > Set Keys
 - Access key = open tame/storage inv, Inv key = your own inventory (for sheep script), Drop key = key you popcorn with
