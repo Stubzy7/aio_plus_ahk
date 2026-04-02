@@ -9708,18 +9708,17 @@ GetPixelARGB(capture, x, y) {
 
 CaptureWindow(windowTitle) {
     hwnd := WinExist(windowTitle)
-    if !hwnd {
-        MsgBox("Window not found!")
+    if !hwnd
         return 0
-    }
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
+    if (ww <= 0 || wh <= 0)
+        return 0
     hdcWindow  := DllCall("GetWindowDC","Ptr",hwnd)
     hdcMem     := DllCall("CreateCompatibleDC","Ptr",hdcWindow)
     hBitmap    := DllCall("CreateCompatibleBitmap","Ptr",hdcWindow,"Int",ww,"Int",wh)
     hOldBitmap := DllCall("SelectObject","Ptr",hdcMem,"Ptr",hBitmap)
     if !DllCall("PrintWindow","Ptr",hwnd,"Ptr",hdcMem,"Uint",2) {
-        MsgBox("Screenshot failed!")
-        return 0
+        DllCall("BitBlt","Ptr",hdcMem,"Int",0,"Int",0,"Int",ww,"Int",wh,"Ptr",hdcWindow,"Int",0,"Int",0,"Uint",0x00CC0020)
     }
     DllCall("ReleaseDC","Ptr",hwnd,"Ptr",hdcWindow)
     return { dc: hdcMem, bitmap: hBitmap, oldBitmap: hOldBitmap }
