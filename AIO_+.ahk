@@ -10859,9 +10859,14 @@ SheepStartLoop() {
             if (!sheepRunning)
                 return
             SheepDropAll()
+            blackWait := 0
             Loop {
                 if (!sheepRunning)
                     return
+                blackWait++
+                if (blackWait > 150) {
+                    break
+                }
                 Sleep(200)
                 if (WinActive(arkWindow)) {
                     color := PixelGetColor(checkX, checkY)
