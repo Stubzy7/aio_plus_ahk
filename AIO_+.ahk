@@ -9710,7 +9710,8 @@ CaptureWindow(windowTitle) {
     hwnd := WinExist(windowTitle)
     if !hwnd
         return 0
-    if DllCall("IsHungAppWindow", "Ptr", hwnd)
+    responsive := DllCall("SendMessageTimeoutW", "Ptr", hwnd, "UInt", 0x0000, "Ptr", 0, "Ptr", 0, "UInt", 0x0002, "UInt", 500, "Ptr*", &pdwResult := 0)
+    if (!responsive)
         return 0
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
     if (ww <= 0 || wh <= 0)
