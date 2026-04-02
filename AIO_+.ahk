@@ -10863,7 +10863,30 @@ SheepStartLoop() {
             if (!sheepRunning)
                 return
             SheepDropAll()
-            Sleep(1500)
+            blackWait := 0
+            Loop {
+                if (!sheepRunning)
+                    return
+                blackWait++
+                if (blackWait > 50)
+                    break
+                Sleep(200)
+                if (WinActive(arkWindow)) {
+                    color := PixelGetColor(checkX, checkY)
+                    cr := (color >> 16) & 0xFF
+                    cg := (color >> 8)  & 0xFF
+                    cb := color & 0xFF
+                } else {
+                    px := SheepBgPxGet(hwnd, checkX, checkY)
+                    if (px.r = -1) {
+                        continue
+                    }
+                    cr := px.r, cg := px.g, cb := px.b
+                }
+                if (!(cr < 15 && cg < 15 && cb < 15))
+                    break
+            }
+            Sleep(500)
         }
         Sleep(50)
     }
