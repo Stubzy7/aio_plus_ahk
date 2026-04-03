@@ -783,8 +783,7 @@ states := [
                                  x2: ServerJoinOffsetX,   y2: ServerJoinOffsetY,   c2: col.Join },
     { name: "ServerBrowser",     x: ServerBrowserOffsetX, y: ServerBrowserOffsetY, c: col.ServerBrowser,
                                  calt: col.ServerBrowserAlt },
-    { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu,
-                                 x2: ModJoinDetectX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
+    { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu },
     { name: "ContentFailed",     x: ContentFailedOffsetX, y: ContentFailedOffsetY, c: col.ContentFailed },
     { name: "MainMenu",          x: MainMenuJoinOffsetX,  y: MainMenuJoinOffsetY,  c: col.MainMenu },
     { name: "MiddleMenu",        x: MiddleMenuOffsetX,    y: MiddleMenuOffsetY,    c: col.MiddleMenu,
@@ -801,8 +800,7 @@ statesB := [
                                  x2: ServerJoinOffsetX,   y2: ServerJoinOffsetY,   c2: col.Join },
     { name: "ServerBrowser",     x: ServerBrowserOffsetX, y: ServerBrowserOffsetY, c: col.ServerBrowser,
                                  calt: col.ServerBrowserAlt },
-    { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu,
-                                 x2: ModJoinDetectX,      y2: ModJoinOffsetY,      c2: col.ModJoin },
+    { name: "ModMenu",           x: ModMenuOffsetX,       y: ModMenuOffsetY,       c: col.ModMenu },
     { name: "MainMenu",          x: MainMenuJoinOffsetX,  y: MainMenuJoinOffsetY,  c: col.MainMenu },
     { name: "MiddleMenu",        x: MiddleMenuOffsetX,    y: MiddleMenuOffsetY,    c: col.MiddleMenu }
 ]
@@ -9699,6 +9697,8 @@ IsColorSimilar(color1, color2, tolerance := coltol) {
 }
 
 GetPixelARGB(capture, x, y) {
+    if (!IsObject(capture))
+        return "0xFF000000"
     color := DllCall("GetPixel","Ptr",capture.dc,"Int",x,"Int",y,"UInt")
     r := (color & 0xFF)
     g := (color & 0xFF00)   >> 8
@@ -9710,9 +9710,6 @@ CaptureWindow(windowTitle) {
     hwnd := WinExist(windowTitle)
     if !hwnd
         return 0
-    responsive := DllCall("SendMessageTimeoutW", "Ptr", hwnd, "UInt", 0x0000, "Ptr", 0, "Ptr", 0, "UInt", 0x0002, "UInt", 500, "Ptr*", &pdwResult := 0)
-    if (!responsive)
-        return 0
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
     if (ww <= 0 || wh <= 0)
         return 0
@@ -9720,14 +9717,85 @@ CaptureWindow(windowTitle) {
     hdcMem     := DllCall("CreateCompatibleDC","Ptr",hdcWindow)
     hBitmap    := DllCall("CreateCompatibleBitmap","Ptr",hdcWindow,"Int",ww,"Int",wh)
     hOldBitmap := DllCall("SelectObject","Ptr",hdcMem,"Ptr",hBitmap)
-    if !DllCall("PrintWindow","Ptr",hwnd,"Ptr",hdcMem,"Uint",2) {
+    captured := _PrintWindowThreaded(hwnd, hdcMem, 2, 500)
+    if (captured = -1) {
+        DllCall("SelectObject","Ptr",hdcMem,"Ptr",hOldBitmap)
+        DllCall("DeleteDC","Ptr",hdcMem)
+        DllCall("DeleteObject","Ptr",hBitmap)
+        DllCall("ReleaseDC","Ptr",hwnd,"Ptr",hdcWindow)
+        return 0
+    }
+    if (!captured) {
         DllCall("BitBlt","Ptr",hdcMem,"Int",0,"Int",0,"Int",ww,"Int",wh,"Ptr",hdcWindow,"Int",0,"Int",0,"Uint",0x00CC0020)
     }
     DllCall("ReleaseDC","Ptr",hwnd,"Ptr",hdcWindow)
     return { dc: hdcMem, bitmap: hBitmap, oldBitmap: hOldBitmap }
 }
 
+_PrintWindowThreaded(hwnd, hdc, flags, timeoutMs) {
+    static code := 0
+    if (!code) {
+        if (A_PtrSize = 8) {
+            hex := "534883EC20"  ; push rbx; sub rsp,0x20
+                .  "4889CB"      ; mov rbx, rcx
+                .  "488B0B"      ; mov rcx, [rbx]       (hwnd)
+                .  "488B5308"    ; mov rdx, [rbx+8]     (hdc)
+                .  "448B4310"    ; mov r8d, [rbx+0x10]  (flags)
+                .  "FF5318"      ; call [rbx+0x18]      (PrintWindow)
+                .  "894314"      ; mov [rbx+0x14], eax  (result)
+                .  "4883C420"    ; add rsp,0x20
+                .  "5B"          ; pop rbx
+                .  "C3"          ; ret
+        } else {
+            hex := "53"          ; push ebx
+                .  "8B5C2408"    ; mov ebx, [esp+8]
+                .  "FF7308"      ; push [ebx+8]   (flags)
+                .  "FF7304"      ; push [ebx+4]   (hdc)
+                .  "FF33"        ; push [ebx]      (hwnd)
+                .  "FF5310"      ; call [ebx+0x10] (PrintWindow, stdcall)
+                .  "89430C"      ; mov [ebx+0xC], eax
+                .  "5B"          ; pop ebx
+                .  "C20400"      ; ret 4
+        }
+        code := Buffer(StrLen(hex) // 2)
+        Loop StrLen(hex) // 2
+            NumPut("UChar", Integer("0x" . SubStr(hex, A_Index * 2 - 1, 2)), code, A_Index - 1)
+        DllCall("VirtualProtect", "Ptr", code.Ptr, "UInt", code.Size, "UInt", 0x40, "UInt*", &old := 0)
+        code := code
+    }
+    pwAddr := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "user32", "Ptr"), "AStr", "PrintWindow", "Ptr")
+    if (A_PtrSize = 8) {
+        params := Buffer(32, 0)
+        NumPut("Ptr", hwnd, params, 0)
+        NumPut("Ptr", hdc, params, 8)
+        NumPut("UInt", flags, params, 16)
+        NumPut("Ptr", pwAddr, params, 24)
+        resultOff := 20
+    } else {
+        params := Buffer(20, 0)
+        NumPut("UInt", hwnd, params, 0)
+        NumPut("UInt", hdc, params, 4)
+        NumPut("UInt", flags, params, 8)
+        NumPut("UInt", pwAddr, params, 16)
+        resultOff := 12
+    }
+    hThread := DllCall("CreateThread", "Ptr", 0, "UInt", 0, "Ptr", code.Ptr, "Ptr", params.Ptr, "UInt", 0, "Ptr*", &tid := 0, "Ptr")
+    if (!hThread)
+        return false
+    wait := DllCall("WaitForSingleObject", "Ptr", hThread, "UInt", timeoutMs, "UInt")
+    if (wait = 0x102) {
+        DllCall("TerminateThread", "Ptr", hThread, "UInt", 0)
+        DllCall("CloseHandle", "Ptr", hThread)
+        return -1
+    }
+    result := NumGet(params, resultOff, "UInt")
+    DllCall("CloseHandle", "Ptr", hThread)
+    return result
+}
+
 ReleaseCapture(img) {
+    if (!IsObject(img))
+        return
     DllCall("SelectObject","Ptr",img.dc,"Ptr",img.oldBitmap)
     DllCall("DeleteDC","Ptr",img.dc)
     DllCall("DeleteObject","Ptr",img.bitmap)
@@ -9819,6 +9887,7 @@ CheckState() {
     colorDump .= "NoSessConfirm=" GetPixelARGB(img, NoSessConfirmX, NoSessConfirmY) " "
     colorDump .= "NoSessRow=" GetPixelARGB(img, NoSessRowCheckX, NoSessRowCheckY) " "
     colorDump .= "BeLogo=" GetPixelARGB(img, BeLogoOffsetX, BeLogoOffsetY) " "
+    colorDump .= "ModJoin=" GetPixelARGB(img, ModJoinDetectX, ModJoinOffsetY) " "
     simLastColors := colorDump
     simLastState := result != "" ? result : "Unknown"
     ReleaseCapture(img)
@@ -10759,6 +10828,8 @@ SheepBgIsBlack(hwnd, x, y) {
 
 SheepBgIsBright(hwnd, x, y, threshold := 200) {
     px := SheepBgPxGet(hwnd, x, y)
+    if (px.r = -1)
+        return false
     return (px.r > threshold && px.g > threshold && px.b > threshold)
 }
 
@@ -10797,6 +10868,7 @@ SheepStartLoop() {
     fgHeld := false
     arkWasActive := WinActive(arkWindow) ? true : false
     userHasControl := false
+    failCount := 0
     Sleep(150)
 
     Loop {
@@ -10818,6 +10890,7 @@ SheepStartLoop() {
                 global sheepBgHeld := false
             }
             userHasControl := true
+            failCount := 0
         }
         if (!arkIsActive && arkWasActive) {
             if (fgHeld) {
@@ -10844,10 +10917,26 @@ SheepStartLoop() {
             g := (color >> 8)  & 0xFF
             b := color & 0xFF
             isBlack := (r < 15 && g < 15 && b < 15)
+            failCount := 0
         } else {
             SheepBgMouseDown(childHwnd)
             global sheepBgHeld := true
-            isBlack := SheepBgIsBlack(hwnd, checkX, checkY)
+            px := SheepBgPxGet(hwnd, checkX, checkY)
+            if (px.r = -1) {
+                failCount++
+                if (failCount >= 5) {
+                    if (sheepBgHeld) {
+                        SheepBgMouseUp(childHwnd)
+                        global sheepBgHeld := false
+                    }
+                    Sleep(3000)
+                    failCount := 0
+                }
+                Sleep(50)
+                continue
+            }
+            failCount := 0
+            isBlack := (px.r < 15 && px.g < 15 && px.b < 15)
         }
 
         if (isBlack) {
@@ -10868,7 +10957,7 @@ SheepStartLoop() {
                 if (!sheepRunning)
                     return
                 blackWait++
-                if (blackWait > 50)
+                if (blackWait > 40)
                     break
                 Sleep(200)
                 if (WinActive(arkWindow)) {
@@ -10878,9 +10967,8 @@ SheepStartLoop() {
                     cb := color & 0xFF
                 } else {
                     px := SheepBgPxGet(hwnd, checkX, checkY)
-                    if (px.r = -1) {
+                    if (px.r = -1)
                         continue
-                    }
                     cr := px.r, cg := px.g, cb := px.b
                 }
                 if (!(cr < 15 && cg < 15 && cb < 15))
