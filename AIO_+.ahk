@@ -1377,6 +1377,7 @@ MagicFToggleRefill(*) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
             SafeDisableZ()
+            try Hotkey("$q", "Off")
             ToolTip()
         }
     }
@@ -2219,6 +2220,7 @@ OnTabChange(ctrl, *) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
             SafeDisableZ()
+            try Hotkey("$q", "Off")
             if (!macroPlaying)
                 ToolTip()
         }
@@ -2649,11 +2651,13 @@ RunMagicF(*) {
         [WoodCheckboxGive,    "Wood",     "wood"]
     ]
     if (CustomCheckBoxGive.Value) {
-        for , _gf in mfGiveFilterList
-            givePairs.Push([CustomCheckBoxGive, "Custom [" _gf "]", _gf])
         _gfCur := Trim(CustomEditGive.Text)
-        if (_gfCur != "" && !AcListHas(mfGiveFilterList, _gfCur))
+        if (_gfCur != "" && !AcListHas(mfGiveFilterList, _gfCur)) {
             givePairs.Push([CustomCheckBoxGive, "Custom [" _gfCur "]", _gfCur])
+        } else {
+            for , _gf in mfGiveFilterList
+                givePairs.Push([CustomCheckBoxGive, "Custom [" _gf "]", _gf])
+        }
     }
 
     takePairs := [
@@ -2683,11 +2687,13 @@ RunMagicF(*) {
         [WoodCheckboxTake,        "Wood",     "wood"]
     ]
     if (CustomCheckBoxTake.Value) {
-        for , _tf in mfTakeFilterList
-            takePairs.Push([CustomCheckBoxTake, "Custom [" _tf "]", _tf])
         _tfCur := Trim(CustomEditTake.Text)
-        if (_tfCur != "" && !AcListHas(mfTakeFilterList, _tfCur))
+        if (_tfCur != "" && !AcListHas(mfTakeFilterList, _tfCur)) {
             takePairs.Push([CustomCheckBoxTake, "Custom [" _tfCur "]", _tfCur])
+        } else {
+            for , _tf in mfTakeFilterList
+                takePairs.Push([CustomCheckBoxTake, "Custom [" _tf "]", _tf])
+        }
     }
 
     if (magicFRefillMode) {
@@ -2725,7 +2731,23 @@ RunMagicF(*) {
     MainGui.Hide
     global guiVisible := false
     try Hotkey("$z", MagicFSwapDirection, "On")
+    if (magicFPresetNames.Length > 1)
+        try Hotkey("$q", MagicFQCycle, "On")
     ToolTip(MagicFBuildTooltip(), 0, 0)
+}
+
+MagicFQCycle(thisHotkey) {
+    global runMagicFScript, magicFRefillMode, magicFPresetIdx, magicFPresetNames
+    if (!runMagicFScript || !WinActive(arkwindow)) {
+        Send("{q}")
+        return
+    }
+    if (magicFRefillMode)
+        return
+    if (magicFPresetNames.Length > 1) {
+        magicFPresetIdx := Mod(magicFPresetIdx, magicFPresetNames.Length) + 1
+        ToolTip(MagicFBuildTooltip(), 0, 0)
+    }
 }
 
 MagicFBuildTooltip() {
@@ -3861,6 +3883,7 @@ GmkToggle() {
         if (runMagicFScript) {
             global runMagicFScript := false
             SafeDisableZ()
+            try Hotkey("$q", "Off")
         }
         if (quickFeedMode > 0) {
             global quickFeedMode := 0
@@ -16602,6 +16625,7 @@ $F1:: {
         global gmkMode               := "off"
         try gmkStatusTxt.Text        := ""
         SafeDisableZ()
+        try Hotkey("$q", "Off")
         global acSimpleArmed         := false
         global acTimedArmed          := false
         global acGridArmed           := false
@@ -17151,16 +17175,6 @@ PcHotkeyBracketRight(thisHotkey) {
         ToolTip()
         MainGui.Show()
         global guiVisible := true
-        return
-    }
-    if (runMagicFScript) {
-        if (magicFRefillMode)
-            return
-        global magicFPresetIdx, magicFPresetNames
-        if (magicFPresetNames.Length > 1) {
-            magicFPresetIdx := Mod(magicFPresetIdx, magicFPresetNames.Length) + 1
-            ToolTip(MagicFBuildTooltip(), 0, 0)
-        }
         return
     }
     if (runMammothScript) {
