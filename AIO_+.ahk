@@ -28,6 +28,7 @@ global heightmultiplier := A_ScreenHeight / 1440
 global widthmultiplier  := A_ScreenWidth  / 2560
 global arkRunning       := false
 global guiVisible       := true
+global reconnectKey         := ""
 global runMagicFScript      := false
 global magicFRefillMode     := false
 global magicFPresetNames    := []
@@ -278,6 +279,7 @@ global obInvTimeout       := 250
 global obCharTravelX      := 0
 global obCharTravelY      := 0
 global obCharCustomServer := ""
+global obCharLastServer   := ""
 global obCharSvrIdx       := 0
 global obCharTimerStage   := 0
 
@@ -348,6 +350,9 @@ global iniCustomCommand := readini("ini", "customcommand")
 if (iniCustomCommand = "Default")
     iniCustomCommand := ""
 
+global reconnectKey := readini("reconnect", "key")
+if (reconnectKey = "Default")
+    reconnectKey := ""
 
 global iniDefaultCommand := "sg.FoliageQuality 0 | sg.TextureQuality 0 | r.Shading.FurnaceTest.SampleCount 0 | r.VolumetricCloud 0 | r.VolumetricFog 0 | r.Water.SingleLayer.Reflection 0 | r.ShadowQuality 0 | r.ContactShadows 0 | r.DepthOfFieldQuality 0 | r.Fog 0 | r.BloomQuality 0 | r.LightCulling.Quality 0 | r.SkyAtmosphere 1 | r.Lumen.Reflections.Allow 1 | r.Lumen.DiffuseIndirect.Allow 1 | r.Shadow.Virtual.Enable 0 | r.DistanceFieldShadowing 1 | r.Shadow.CSM.MaxCascades 0 | r.SkylightIntensityMultiplier 99 | grass.SizeScale 0 | ark.MaxActiveDestroyedMeshGeoCollectionCount 0 | sg.GlobalIlluminationQuality 1 | r.Nanite.MaxPixelsPerEdge 3 | r.Tonemapper.Sharpen 3 | r.SkyLight.RealTimeReflectionCapture 0 | r.EyeAdaptation.BlackHistogramBucketInfluence 0 | r.Lumen.Reflections.Contrast 0 | r.LightMaxDrawDistanceScale -1 | r.Lumen.ScreenProbeGather.DirectLighting 1 | r.Color.Grading 0 | fx.MaxNiagaraGPUParticlesSpawnPerFrame 50 | Slate.GlobalScrollAmount 120 | r.SkyLightingQuality 1 | r.VT.EnableFeedback 0 | gamma | r.ScreenPercentage 100 | grass.DensityScale 0 | stat FPS | r.MinRoughnessOverride 1 | r.DynamicGlobalIlluminationMethod 1 | r.Streaming.PoolSize 1 | r.MipMapLODBias 0 | r.Lumen.ScreenProbeGather.RadianceCache.ProbeResolution 16 | r.VSync 0 | show InstancedFoliage | show InstancedGrass | show InstancedStaticMeshes | r.AOOverwriteSceneColor 1 | Slate.Contrast 1 | sg.ReflectionQuality 0"
 
@@ -1377,7 +1382,6 @@ MagicFToggleRefill(*) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
             SafeDisableZ()
-            try Hotkey("$q", "Off")
             ToolTip()
         }
     }
@@ -1828,82 +1832,81 @@ qhSingleBtn := MainGui.Add("CheckBox", "x160 y32 w140 h23", "Quick Hatch (Single
 qhSingleBtn.OnEvent("Click", (*) => QhToggleMode(qhSingleBtn, 2))
 
 MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
-qhStartBtn  := DarkBtn(MainGui, "x308 y137 w70 h28", "START", _RED_BGR, _DK_BG, -12, true)
+qhStartBtn  := DarkBtn(MainGui, "x308 y131 w70 h28", "START", _RED_BGR, _DK_BG, -12, true)
 qhStartBtn.OnEvent("Click", QhStart)
 
 MainGui.SetFont("s8 c888888 Italic", "Segoe UI")
 global qhStatusTxt := MainGui.Add("Text", "x22 y62 w200 h14", "Select a mode then press START")
 
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x22 y90 w80", "Claim/Name")
+MainGui.Add("Text", "x22 y84 w80", "Claim/Name")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global cnEnableBtn := MainGui.Add("CheckBox", "x105 y90 w15 h20")
-cnEnableBtn.OnEvent("Click", (*) => (cnEnableBtn.Value ? nsEnableBtn.Value := 0 : 0))
-global depoEmbryoBtn := MainGui.Add("CheckBox", "x135 y90 w110 h20", "Depo Embryo")
+global cnEnableBtn := MainGui.Add("CheckBox", "x105 y84 w15 h20")
+cnEnableBtn.OnEvent("Click", CnEnableToggle)
+global depoEmbryoBtn := MainGui.Add("CheckBox", "x135 y84 w110 h20", "Depo Embryo")
 depoEmbryoBtn.SetFont("s8 cDDDDDD", "Segoe UI")
 
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x22 y114 w80", "Name/Spay")
+MainGui.Add("Text", "x22 y108 w80", "Name/Spay")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global nsEnableBtn := MainGui.Add("CheckBox", "x105 y114 w15 h20")
-nsEnableBtn.OnEvent("Click", (*) => (nsEnableBtn.Value ? cnEnableBtn.Value := 0 : 0))
-global depoEggsBtn := MainGui.Add("CheckBox", "x135 y114 w100 h20", "Depo Eggs")
+global nsEnableBtn := MainGui.Add("CheckBox", "x105 y108 w15 h20")
+nsEnableBtn.OnEvent("Click", NsEnableToggle)
+global depoEggsBtn := MainGui.Add("CheckBox", "x135 y108 w100 h20", "Depo Eggs")
 depoEggsBtn.SetFont("s8 cDDDDDD", "Segoe UI")
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-MainGui.Add("Text", "x22 y140 w55 h25 +0x200", "Name:").SetFont("s9 bold cDDDDDD", "Segoe UI")
-ClaimAndNameEdit := MainGui.Add("ComboBox", "x78 y140 w128 h21 r8", [])
+MainGui.Add("Text", "x22 y134 w55 h25 +0x200", "Name:").SetFont("s9 bold cDDDDDD", "Segoe UI")
+ClaimAndNameEdit := MainGui.Add("ComboBox", "x78 y134 w128 h21 r8", [])
 ClaimAndNameEdit.SetFont("s9 c000000", "Segoe UI")
-cnAddBtn := DarkBtn(MainGui, "x208 y140 w16 h21", "+", _RED_BGR, _DK_BG, -11, true)
+ClaimAndNameEdit.OnEvent("Change", (*) => IniWrite(ClaimAndNameEdit.Text, A_ScriptDir "\AIO_config.ini", "Hatch", "DinoName"))
+cnAddBtn := DarkBtn(MainGui, "x208 y134 w16 h21", "+", _RED_BGR, _DK_BG, -11, true)
 cnAddBtn.OnEvent("Click", CnAddName)
-cnDelBtn := DarkBtn(MainGui, "x226 y140 w16 h21", "-", _RED_BGR, _DK_BG, -11, true)
+cnDelBtn := DarkBtn(MainGui, "x226 y134 w16 h21", "-", _RED_BGR, _DK_BG, -11, true)
 cnDelBtn.OnEvent("Click", CnRemoveName)
-global nsCryoBtn := MainGui.Add("CheckBox", "x248 y140 w15 h25")
+global nsCryoBtn := MainGui.Add("CheckBox", "x248 y134 w15 h25")
+nsCryoBtn.OnEvent("Click", CryoToggle)
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-MainGui.Add("Text", "x265 y140 w35 h25 +0x200", "Cryo")
+MainGui.Add("Text", "x265 y134 w35 h25 +0x200", "Cryo")
 nsHelpBtn := DarkBtn(MainGui, "x350 y32 w24 h23", "?", _RED_BGR, _DK_BG, -11, true)
 nsHelpBtn.OnEvent("Click", NsShowHelp)
 
-MainGui.Add("Text", "x8 y170 w366 h1 +0x10")
+MainGui.Add("Text", "x8 y164 w366 h1 +0x10")
 
 ; --- INI ---
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x22 y178 w200", "Apply INI  —  F5")
+MainGui.Add("Text", "x22 y170 w200", "Apply INI  —  F5")
 MainGui.SetFont("s8 c888888", "Segoe UI")
-MainGui.Add("Text", "x22 y196 w200", "Pastes INI into command bar")
+MainGui.Add("Text", "x22 y186 w200", "Pastes INI into command bar")
 
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-MainGui.Add("Text", "x22 y216 w55 h20 +0x200", "Cmd Key:")
-global iniCmdKeyEdit := MainGui.Add("Edit", "x78 y216 w55 h20", iniCommandKey)
+MainGui.Add("Text", "x22 y204 w55 h20 +0x200", "Cmd Key:")
+global iniCmdKeyEdit := MainGui.Add("Edit", "x78 y204 w55 h20", iniCommandKey)
 iniCmdKeyEdit.SetFont("s8 c000000", "Segoe UI")
-iniSetKeyBtn := DarkBtn(MainGui, "x136 y216 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
+iniSetKeyBtn := DarkBtn(MainGui, "x136 y204 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
 iniSetKeyBtn.OnEvent("Click", IniDetectCommandKey)
-iniSaveCmdBtn := DarkBtn(MainGui, "x175 y216 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
+iniSaveCmdBtn := DarkBtn(MainGui, "x175 y204 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
 iniSaveCmdBtn.OnEvent("Click", IniSaveCommandKey)
 
 MainGui.SetFont("s8 c888888", "Segoe UI")
-MainGui.Add("Text", "x22 y240 w200", "Custom INI (blank = default):")
-global iniCustomEdit := MainGui.Add("Edit", "x22 y256 w200 h40 +Multi +Wrap", iniCustomCommand)
+MainGui.Add("Text", "x22 y226 w200", "Custom INI (blank = default):")
+global iniCustomEdit := MainGui.Add("Edit", "x22 y242 w200 h40 +Multi +Wrap", iniCustomCommand)
 iniCustomEdit.SetFont("s8 c000000", "Segoe UI")
-iniSaveCustomBtn := DarkBtn(MainGui, "x22 y300 w96 h20", "Save Custom INI", _RED_BGR, _DK_BG, -11, true)
+iniSaveCustomBtn := DarkBtn(MainGui, "x22 y286 w96 h20", "Save Custom INI", _RED_BGR, _DK_BG, -11, true)
 iniSaveCustomBtn.OnEvent("Click", IniSaveCustomCommand)
 
-hatchSaveBtn := DarkBtn(MainGui, "x22 y324 w70 h20", "Save Hatch", _RED_BGR, _DK_BG, -11, true)
-hatchSaveBtn.OnEvent("Click", SaveHatchSettings)
-
-global miscSetKeysBtn := DarkBtn(MainGui, "x22 y348 w70 h20", "Set Keys", _RED_BGR, _DK_BG, -11, true)
+global miscSetKeysBtn := DarkBtn(MainGui, "x22 y310 w70 h20", "Set Keys", _RED_BGR, _DK_BG, -11, true)
 miscSetKeysBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
 
 ; --- AUTO PIN / NVIDIA FILTER ---
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x122 y324 w10 h40 +0x200", "|")
+MainGui.Add("Text", "x122 y310 w10 h40 +0x200", "|")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global pinEnableBtn := MainGui.Add("CheckBox", "x136 y324 w80 h20", "Auto Pin")
+global pinEnableBtn := MainGui.Add("CheckBox", "x136 y310 w80 h20", "Auto Pin")
 pinEnableBtn.Value := pinAutoOpen
 pinEnableBtn.OnEvent("Click", PinToggle)
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global nfEnableBtn := MainGui.Add("CheckBox", "x136 y344 w120 h20", "NVIDIA Filter")
+global nfEnableBtn := MainGui.Add("CheckBox", "x136 y330 w120 h20", "NVIDIA Filter")
 nfEnableBtn.Value := nfEnabled
 nfEnableBtn.OnEvent("Click", NFToggle)
 
@@ -1926,6 +1929,27 @@ NFLoadSetting() {
         val := IniRead(A_ScriptDir "\AIO_config.ini", "NVIDIAFilter", "Enabled", "0")
         global nfEnabled := (val = "1")
     }
+}
+
+CnEnableToggle(*) {
+    global cnEnableBtn, nsEnableBtn
+    if (cnEnableBtn.Value)
+        nsEnableBtn.Value := 0
+    IniWrite(cnEnableBtn.Value, A_ScriptDir "\AIO_config.ini", "Hatch", "ClaimNameEnabled")
+    IniWrite(nsEnableBtn.Value, A_ScriptDir "\AIO_config.ini", "Hatch", "NameSpayEnabled")
+}
+
+NsEnableToggle(*) {
+    global cnEnableBtn, nsEnableBtn
+    if (nsEnableBtn.Value)
+        cnEnableBtn.Value := 0
+    IniWrite(nsEnableBtn.Value, A_ScriptDir "\AIO_config.ini", "Hatch", "NameSpayEnabled")
+    IniWrite(cnEnableBtn.Value, A_ScriptDir "\AIO_config.ini", "Hatch", "ClaimNameEnabled")
+}
+
+CryoToggle(*) {
+    global nsCryoBtn
+    IniWrite(nsCryoBtn.Value, A_ScriptDir "\AIO_config.ini", "Hatch", "CryoEnabled")
 }
 
 ; --- AUTO IMPRINT ---
@@ -1969,6 +1993,22 @@ ufAddBtn := DarkBtn(MainGui, "x374 y322 w18 h21", "+", _RED_BGR, _DK_BG, -11, tr
 ufAddBtn.OnEvent("Click", UfAddFilter)
 ufDelBtn := DarkBtn(MainGui, "x394 y322 w18 h21", "-", _RED_BGR, _DK_BG, -11, true)
 ufDelBtn.OnEvent("Click", UfRemoveFilter)
+
+; --- RECONNECT ---
+MainGui.Add("Text", "x8 y347 w410 h1 +0x10")
+MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.Add("Text", "x22 y353 w80", "Reconnect")
+MainGui.SetFont("s8 c888888", "Segoe UI")
+MainGui.Add("Text", "x104 y355 w200", "Hotkey sends reconnect to cmd bar")
+
+MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
+MainGui.Add("Text", "x22 y375 w30 h20 +0x200", "Key:")
+global reconKeyEdit := MainGui.Add("Edit", "x54 y375 w70 h20", reconnectKey)
+reconKeyEdit.SetFont("s8 c000000", "Segoe UI")
+reconSetKeyBtn := DarkBtn(MainGui, "x127 y375 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
+reconSetKeyBtn.OnEvent("Click", ReconnectDetectKey)
+reconSaveKeyBtn := DarkBtn(MainGui, "x166 y375 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
+reconSaveKeyBtn.OnEvent("Click", ReconnectSaveKey)
 
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2137,6 +2177,8 @@ try {
 }
 NFLoadSetting()
 try nfEnableBtn.Value := nfEnabled
+if (reconnectKey != "")
+    try Hotkey(reconnectKey, ReconnectHandler, "On")
 PcLoadScanArea()
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2158,7 +2200,6 @@ OnTabChange(ctrl, *) {
     }
     if (ctrl.Value != 3 && runAutoLvlScript) {
         global runAutoLvlScript := false
-        try Hotkey("$q", "Off")
         DarkBtnText(StartAutoLvlButton, "START")
         if (!macroPlaying)
             ToolTip()
@@ -2220,7 +2261,6 @@ OnTabChange(ctrl, *) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
             SafeDisableZ()
-            try Hotkey("$q", "Off")
             if (!macroPlaying)
                 ToolTip()
         }
@@ -2379,17 +2419,69 @@ IniSaveCustomCommand(*) {
     SetTimer(() => ToolTip(), -2000)
 }
 
-SaveHatchSettings(*) {
-    global qhMode, qhAllBtn, qhSingleBtn, cnEnableBtn, nsEnableBtn, nsCryoBtn, ClaimAndNameEdit
-    configFile := A_ScriptDir "\AIO_config.ini"
-    hm := qhAllBtn.Value ? 1 : (qhSingleBtn.Value ? 2 : 0)
-    IniWrite(hm, configFile, "Hatch", "HatchMode")
-    IniWrite(cnEnableBtn.Value, configFile, "Hatch", "ClaimNameEnabled")
-    IniWrite(nsEnableBtn.Value, configFile, "Hatch", "NameSpayEnabled")
-    IniWrite(nsCryoBtn.Value, configFile, "Hatch", "CryoEnabled")
-    IniWrite(ClaimAndNameEdit.Text, configFile, "Hatch", "DinoName")
-    ToolTip("Hatch settings saved!")
+ReconnectDetectKey(*) {
+    global reconKeyEdit
+    reconKeyEdit.Value := ""
+    reconKeyEdit.Focus()
+    ih := InputHook("L10 T10")
+    ih.KeyOpt("{All}", "E")
+    ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
+    ih.Start()
+    ToolTip("Press your reconnect hotkey...")
+    ih.Wait()
+    ToolTip()
+    if (ih.EndReason = "EndKey") {
+        key := ih.EndKey
+        reconKeyEdit.Value := key
+    } else if (ih.EndReason = "Timeout") {
+        ToolTip("Timed out")
+        SetTimer(() => ToolTip(), -1500)
+    }
+}
+
+ReconnectSaveKey(*) {
+    global reconnectKey, reconKeyEdit
+    val := Trim(reconKeyEdit.Value)
+    if (val = "") {
+        ToolTip("Reconnect key cannot be empty!")
+        SetTimer(() => ToolTip(), -2000)
+        return
+    }
+    oldKey := reconnectKey
+    global reconnectKey := val
+    IniWrite(val, A_ScriptDir "\AIO_config.ini", "reconnect", "key")
+    if (oldKey != "") {
+        try Hotkey(oldKey, "Off")
+    }
+    try Hotkey(val, ReconnectHandler, "On")
+    ToolTip("Reconnect key saved: " val)
     SetTimer(() => ToolTip(), -2000)
+}
+
+ReconnectHandler(*) {
+    global guiVisible, MainGui, arkwindow, iniCommandKey
+
+    if (guiVisible) {
+        MainGui.Hide()
+        global guiVisible := false
+    }
+
+    if (!WinExist(arkwindow)) {
+        return
+    }
+
+    WinActivate(arkwindow)
+    Sleep(50)
+
+    Send(iniCommandKey)
+    Sleep(150)
+
+    _savedClip := A_Clipboard
+    A_Clipboard := "reconnect"
+    Send("^v")
+    Sleep(100)
+    Send("{Enter}")
+    A_Clipboard := _savedClip
 }
 
 LoadHatchSettings() {
@@ -2731,23 +2823,7 @@ RunMagicF(*) {
     MainGui.Hide
     global guiVisible := false
     try Hotkey("$z", MagicFSwapDirection, "On")
-    if (magicFPresetNames.Length > 1)
-        try Hotkey("$q", MagicFQCycle, "On")
     ToolTip(MagicFBuildTooltip(), 0, 0)
-}
-
-MagicFQCycle(thisHotkey) {
-    global runMagicFScript, magicFRefillMode, magicFPresetIdx, magicFPresetNames
-    if (!runMagicFScript || !WinActive(arkwindow)) {
-        Send("{q}")
-        return
-    }
-    if (magicFRefillMode)
-        return
-    if (magicFPresetNames.Length > 1) {
-        magicFPresetIdx := Mod(magicFPresetIdx, magicFPresetNames.Length) + 1
-        ToolTip(MagicFBuildTooltip(), 0, 0)
-    }
 }
 
 MagicFBuildTooltip() {
@@ -2925,8 +3001,30 @@ magicFpressed() {
 
 QuickFeedCycle(*) {
     global quickFeedMode, MainGui, guiVisible, arkwindow
+    global pcF10Step, pcMode, pcF10StatusTxt, pcF10SpeedTxt
+    global obUploadArmed, obUploadMode, obDownloadArmed, gmkMode
 
     quickFeedMode := Mod(quickFeedMode + 1, 3)
+
+    if (quickFeedMode = 1 || quickFeedMode = 2) {
+        ; Cancel popcorn if active
+        if (pcF10Step > 0 || pcMode > 0) {
+            global pcF10Step := 0
+            global pcMode := 0
+            try pcF10StatusTxt.Text := ""
+            try pcF10SpeedTxt.Text  := ""
+        }
+
+        ; Cancel OB Upload (preserve server alternating state)
+        global obUploadArmed := false
+        global obUploadMode := 0
+
+        ; Cancel OB Download
+        global obDownloadArmed := false
+
+        ; Cancel GMK
+        global gmkMode := "off"
+    }
 
     if (quickFeedMode = 1) {
         MainGui.Hide()
@@ -2946,8 +3044,7 @@ QuickFeedStop() {
     global quickFeedMode := 0
     ToolTip()
     OBCharRestoreTooltip()
-    MainGui.Show("NoActivate")
-    global guiVisible := true
+    global guiVisible := false
 }
 
 QuickFeedFPressed() {
@@ -2988,7 +3085,6 @@ RunAutoLvl(*) {
     
     if (runAutoLvlScript) {
         global runAutoLvlScript := false
-        try Hotkey("$q", "Off")
         DarkBtnText(StartAutoLvlButton, "START")
         ToolTip()
         return
@@ -3039,19 +3135,6 @@ RunAutoLvl(*) {
     global guiVisible := false
     DarkBtnText(StartAutoLvlButton, "STOP")
     
-    if (autoLvlCycleSlots.Length > 1)
-        Hotkey("$q", AutoLvlQCycle, "On")
-    
-    AutoLvlShowTooltip()
-}
-
-AutoLvlQCycle(thisHotkey) {
-    global autoLvlCycleSlots, autoLvlCycleIdx, runAutoLvlScript, arkwindow
-    if (!runAutoLvlScript || !WinActive(arkwindow)) {
-        Send("{q}")
-        return
-    }
-    global autoLvlCycleIdx := Mod(autoLvlCycleIdx, autoLvlCycleSlots.Length) + 1
     AutoLvlShowTooltip()
 }
 
@@ -3395,6 +3478,8 @@ QhToggleMode(cb, mode) {
         global qhMode := 0
         qhStatusTxt.Text := "Select a mode then press START"
     }
+    hm := qhAllBtn.Value ? 1 : (qhSingleBtn.Value ? 2 : 0)
+    IniWrite(hm, A_ScriptDir "\AIO_config.ini", "Hatch", "HatchMode")
 }
 
 QhStart(*) {
@@ -3883,7 +3968,6 @@ GmkToggle() {
         if (runMagicFScript) {
             global runMagicFScript := false
             SafeDisableZ()
-            try Hotkey("$q", "Off")
         }
         if (quickFeedMode > 0) {
             global quickFeedMode := 0
@@ -11190,7 +11274,7 @@ OBUploadCycle() {
     global obUploadMode, obUploadArmed, obUploadRunning, obUploadPaused, arkwindow, guiVisible
     global pcF10Step, pcMode, pcRunning
     global nsUploadFilterCB, ufList
-    global svrList, obCharSvrIdx
+    global svrList, obCharSvrIdx, obCharLastServer
 
     if (pcMode > 0 || pcF10Step > 0) {
         global pcF10Step := 0
@@ -11255,12 +11339,24 @@ OBUploadCycle() {
             }
         }
         customSvr := ""
-        if (nextSvr != "" && nextSvr != "2386")
-            customSvr := nextSvr
-        if (customSvr = "")
+        if (obCharCustomServer != "" && obCharCustomServer != "2386")
+            customSvr := obCharCustomServer
+
+        ; Server alternating: after uploading to custom, target 2386 next and vice versa
+        if (customSvr != "") {
+            if (obCharLastServer = "2386" || obCharLastServer = "")
+                targetSvr := customSvr
+            else
+                targetSvr := "2386"
+        } else {
+            targetSvr := "2386"
+        }
+        try ServerNumberEdit.Text := targetSvr
+
+        if (targetSvr = "2386")
             nextLabel := "2386"
         else
-            nextLabel := customSvr
+            nextLabel := targetSvr
         note := ""
         if (obCharSvrIdx > 0 && obCharSvrIdx <= svrList.Length && svrList[obCharSvrIdx].note != "")
             note := " (" svrList[obCharSvrIdx].note ")"
@@ -11440,7 +11536,7 @@ OBUploadCharacterThread() {
     global ServerJoinOffsetX, ServerJoinOffsetY
     global ServerNumberEdit, GameWindow, GameWidth, GameHeight
     global widthmultiplier, heightmultiplier
-    global obCharCustomServer
+    global obCharCustomServer, obCharLastServer
     global nfEnabled, obUploadMode
 
     global obCharTravelX := Round(1271 * widthmultiplier)
@@ -11780,6 +11876,7 @@ OBUploadCharacterThread() {
     }
     Sleep(1000)
 
+    global obCharLastServer := serverNum
     global obUploadRunning := false
     global obUploadArmed := false
     global obUploadMode := 0
@@ -11812,18 +11909,14 @@ OBCharSaveServerSilent() {
 
 OBCharRestoreTooltip() {
     global obUploadMode, obUploadArmed, obUploadRunning, guiVisible
-    global obCharCustomServer, ServerNumberEdit, svrList
+    global obCharCustomServer, obCharLastServer, ServerNumberEdit, svrList
     if (obUploadMode != 3 || !obUploadArmed || obUploadRunning || guiVisible)
         return
     nextSvr := ""
     try nextSvr := ServerNumberEdit.Text
-    customSvr := ""
-    if (nextSvr != "" && nextSvr != "2386")
-        customSvr := nextSvr
-    if (customSvr = "")
-        nextLabel := "2386"
-    else
-        nextLabel := customSvr
+    if (nextSvr = "")
+        nextSvr := "2386"
+    nextLabel := nextSvr
     note := ""
     for entry in svrList {
         if (entry.num = nextSvr && entry.note != "") {
@@ -12215,10 +12308,12 @@ _ListLoad(list, combo, section) {
 CnAddName(*) {
     global cnNameList, ClaimAndNameEdit
     _ListAdd(cnNameList, ClaimAndNameEdit, "NameList")
+    IniWrite(ClaimAndNameEdit.Text, A_ScriptDir "\AIO_config.ini", "Hatch", "DinoName")
 }
 CnRemoveName(*) {
     global cnNameList, ClaimAndNameEdit
     _ListRemove(cnNameList, ClaimAndNameEdit, "NameList")
+    IniWrite(ClaimAndNameEdit.Text, A_ScriptDir "\AIO_config.ini", "Hatch", "DinoName")
 }
 
 ; ── Craft Filter Lists ──
@@ -16625,7 +16720,6 @@ $F1:: {
         global gmkMode               := "off"
         try gmkStatusTxt.Text        := ""
         SafeDisableZ()
-        try Hotkey("$q", "Off")
         global acSimpleArmed         := false
         global acTimedArmed          := false
         global acGridArmed           := false
@@ -16643,7 +16737,6 @@ $F1:: {
             global acCraftLoopRunning := false
         }
         global runAutoLvlScript      := false
-        try Hotkey("$q", "Off")
         try DarkBtnText(StartAutoLvlButton, "START")
         global runClaimAndNameScript := false
         global runNameAndSpayScript  := false
@@ -16953,7 +17046,7 @@ PcF10Cycle() {
     global pcF10Step, pcMode, pcCustomFilter, pcForgeTransferAll
     global pcGrinderPoly, pcGrinderMetal, pcGrinderCrystal, pcPresetRaw, pcPresetCooked
     global obUploadArmed, obUploadRunning, obDownloadArmed, obDownloadRunning
-    global gmkMode, gmkStatusTxt
+    global gmkMode, gmkStatusTxt, quickFeedMode
 
     savedDrop := ""
     try savedDrop := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "DropKey", "")
@@ -16970,6 +17063,8 @@ PcF10Cycle() {
         global gmkMode := "off"
         try gmkStatusTxt.Value := ""
     }
+    if (quickFeedMode > 0)
+        QuickFeedStop()
 
     global pcF10Step := Mod(pcF10Step + 1, 3)
     global pcGrinderPoly := false, pcGrinderMetal := false, pcGrinderCrystal := false
@@ -17095,6 +17190,22 @@ PcHotkeyBracketRight(thisHotkey) {
             }
             return
         }
+    }
+
+    if (runMagicFScript) {
+        if (WinActive(arkwindow) && !magicFRefillMode && magicFPresetNames.Length > 1) {
+            global magicFPresetIdx := Mod(magicFPresetIdx, magicFPresetNames.Length) + 1
+            ToolTip(MagicFBuildTooltip(), 0, 0)
+        }
+        return
+    }
+
+    if (runAutoLvlScript) {
+        if (WinActive(arkwindow) && autoLvlCycleSlots.Length > 1) {
+            global autoLvlCycleIdx := Mod(autoLvlCycleIdx, autoLvlCycleSlots.Length) + 1
+            AutoLvlShowTooltip()
+        }
+        return
     }
 
     if (depoEggsActive || depoEmbryoActive) {

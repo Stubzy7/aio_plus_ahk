@@ -2,11 +2,13 @@
 
 ---
 
-Join sim mod/event screen detection fixed
-- "Download Mod / Event" checkbox now gates detection: unchecked skips the mod screen entirely, checked detects and clicks the event JOIN button
-- Detection pixel moved off the button background onto the JOIN text
-
-OB Upload mouse offsets scaled for all resolutions
+Fixed Q cycling when depo eggs and hatch are both selected
+Fixed quick feed cycle-to-off showing the GUI
+Upload char alternates between custom server and 2386 on F6 re-arm
+Added reconnect hotkey (Misc tab, sends reconnect to command bar)
+Quick feed cancels popcorn, OB upload/download, and GMK when armed
+Popcorn cancels quick feed when armed
+Hatch settings auto-save on toggle
 
 ---
 
