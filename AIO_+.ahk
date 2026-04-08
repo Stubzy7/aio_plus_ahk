@@ -335,9 +335,43 @@ global pinPix4Y  := Round(405  * heightmultiplier)
 global pinClickX := Round(1275 * widthmultiplier)
 global pinClickY := Round(999  * heightmultiplier)
 
+; --- Auto Teleport ---
+global tpAutoOpen := true
+global tpPix1X  := Round(437 * widthmultiplier)
+global tpPix1Y  := Round(236 * heightmultiplier)
+global tpPix2X  := Round(628 * widthmultiplier)
+global tpPix2Y  := Round(299 * heightmultiplier)
+global tpClickX := Round(553 * widthmultiplier)
+global tpClickY := Round(1289 * heightmultiplier)
+global tpTol    := 30
+
 ; --- Grab My Kit ---
 global gmkMode := "off"
 
+; --- Log Watch ---
+global logWatchEnabled := false
+global logWatchRunning := false
+global logWatchScanX := 0
+global logWatchScanY := 0
+global logWatchScanW := 300
+global logWatchScanH := 100
+global logWatchThreshold := 3
+global logWatchWords := []
+global logWatchPreset := "Default"
+global logWatchConsecutive := 0
+global logWatchOverlay := ""
+global logWatchWizard := ""
+global logWatchWebhook := ""
+global logWatchPing := ""
+global logWatchStagger := false
+global logWatchStaggerMult := 2
+global logWatchTriggered := false
+global logWatchLastTriggerTime := 0
+global logWatchResizing := false
+global logWatchHideOverlay := false
+global logWatchLockReset := false
+global logWatchLockResetMin := 1
+global logWatchScanOverlay := ""
 global ntfykey := readini("ntfy", "key")
 if (ntfykey = "Default")
     ntfykey := ""
@@ -690,6 +724,7 @@ global simInitialSearchDone := false
 global simMode := 1
 global modsEnabled := false
 global useLast := false
+global simJoinFailed := false
 global toolboxEnabled := true
 global simLog := []
 global simLastState := ""
@@ -974,12 +1009,11 @@ _GGDrawItem(wParam, lParam, msg, hwnd) {
 }
 
 ModeSelectTab.UseTab()
-
 ResText := MainGui.Add("Text","x10 y416 w140","Resolution: " ScreenWidth "x" ScreenHeight)
 ResText.SetFont("s8 c888888","Segoe UI")
 MainGui.Add("Text","x140 y416 w100 Center","Ctrl+Tab = tabs").SetFont("s8 c888888 Italic","Segoe UI")
 MainGui.Add("Text","x240 y416 w80 Center","F4 = Exit").SetFont("s8 c888888 Italic","Segoe UI")
-global ApplicationSelect := MainGui.Add("Text","vApplicationDDL x320 y416 w120 Right","")
+global ApplicationSelect := MainGui.Add("Text","x320 y416 w120 Right","")
 ApplicationSelect.Text := arkwindow
 ApplicationSelect.SetFont("s8 c888888","Segoe UI")
 
@@ -1897,16 +1931,21 @@ iniSaveCustomBtn.OnEvent("Click", IniSaveCustomCommand)
 global miscSetKeysBtn := DarkBtn(MainGui, "x22 y310 w70 h20", "Set Keys", _RED_BGR, _DK_BG, -11, true)
 miscSetKeysBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
 
-; --- AUTO PIN / NVIDIA FILTER ---
+; --- AUTO PIN / AUTO TELEPORT / NVIDIA FILTER ---
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x122 y310 w10 h40 +0x200", "|")
+MainGui.Add("Text", "x122 y286 w10 h60 +0x200", "|")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global pinEnableBtn := MainGui.Add("CheckBox", "x136 y310 w80 h20", "Auto Pin")
+global pinEnableBtn := MainGui.Add("CheckBox", "x136 y286 w80 h20", "Auto Pin")
 pinEnableBtn.Value := pinAutoOpen
 pinEnableBtn.OnEvent("Click", PinToggle)
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global nfEnableBtn := MainGui.Add("CheckBox", "x136 y330 w120 h20", "NVIDIA Filter")
+global tpEnableBtn := MainGui.Add("CheckBox", "x136 y306 w120 h20", "Auto Teleport")
+tpEnableBtn.Value := tpAutoOpen
+tpEnableBtn.OnEvent("Click", TpToggle)
+
+MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
+global nfEnableBtn := MainGui.Add("CheckBox", "x136 y326 w120 h20", "NVIDIA Filter")
 nfEnableBtn.Value := nfEnabled
 nfEnableBtn.OnEvent("Click", NFToggle)
 
@@ -1915,6 +1954,12 @@ PinToggle(*) {
     global pinAutoOpen, pinEnableBtn
     pinAutoOpen := pinEnableBtn.Value
     PinSaveSettings()
+}
+
+TpToggle(*) {
+    global tpAutoOpen, tpEnableBtn
+    tpAutoOpen := tpEnableBtn.Value
+    TpSaveSettings()
 }
 
 NFToggle(*) {
@@ -1955,30 +2000,30 @@ CryoToggle(*) {
 ; --- AUTO IMPRINT ---
 MainGui.Add("Text", "x230 y196 w1 h40 BackgroundFF4444")
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x242 y178 w190", "Auto Imprint")
+MainGui.Add("Text", "x242 y170 w190", "Auto Imprint")
 
-global imprintStartBtn := DarkBtn(MainGui, "x242 y200 w100 h26", "Start", _RED_BGR, _DK_BG, -12, true)
+global imprintStartBtn := DarkBtn(MainGui, "x242 y192 w100 h26", "Start", _RED_BGR, _DK_BG, -12, true)
 imprintStartBtn.OnEvent("Click", ImprintToggleArmed)
 
-imprintHelpBtn := DarkBtn(MainGui, "x344 y200 w24 h26", "?", _RED_BGR, _DK_BG, -11, true)
+imprintHelpBtn := DarkBtn(MainGui, "x344 y192 w24 h26", "?", _RED_BGR, _DK_BG, -11, true)
 imprintHelpBtn.OnEvent("Click", ImprintShowHelp)
 
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-global imprintHideOverlayCB := MainGui.Add("Checkbox", "x242 y230 w140 h16", "Hide scan outline")
+global imprintHideOverlayCB := MainGui.Add("Checkbox", "x242 y222 w140 h16", "Hide scan outline")
 imprintHideOverlayCB.Value := imprintHideOverlay
 imprintHideOverlayCB.OnEvent("Click", ImprintOnHideOverlayToggle)
 
-MainGui.Add("Text", "x242 y252 w50 h20 +0x200", "Inv Key:")
-global imprintInvKeyEdit := MainGui.Add("Edit", "x296 y252 w28 h20 Limit1", imprintInventoryKey)
+MainGui.Add("Text", "x242 y244 w50 h20 +0x200", "Inv Key:")
+global imprintInvKeyEdit := MainGui.Add("Edit", "x296 y244 w28 h20 Limit1", imprintInventoryKey)
 imprintInvKeyEdit.SetFont("s8 c000000", "Segoe UI")
 imprintInvKeyEdit.OnEvent("Change", ImprintOnInvKeyChange)
 
-global imprintResizeBtn := DarkBtn(MainGui, "x326 y252 w52 h20", "Resize", _RED_BGR, _DK_BG, -10, false)
+global imprintResizeBtn := DarkBtn(MainGui, "x326 y244 w52 h20", "Resize", _RED_BGR, _DK_BG, -10, false)
 imprintResizeBtn.OnEvent("Click", ImprintToggleResize)
 
 
 MainGui.SetFont("s8 c888888 Italic", "Segoe UI")
-global imprintStatusTxt := MainGui.Add("Text", "x242 y278 w190 h16", "Press Start then R=read Q=auto")
+global imprintStatusTxt := MainGui.Add("Text", "x242 y270 w190 h16", "Press Start then R=read Q=auto")
 
 ; --- UPLOAD FILTER LIST ---
 MainGui.Add("Text", "x236 y298 w180 h1 +0x10")
@@ -1987,28 +2032,35 @@ MainGui.Add("Text", "x242 y304 w100 h14", "Upload Filter")
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 global nsUploadFilterCB := MainGui.Add("CheckBox", "x342 y302 w15 h18")
 nsUploadFilterCB.OnEvent("Click", (*) => IniWrite(nsUploadFilterCB.Value, A_ScriptDir "\AIO_config.ini", "UploadFilters", "Enabled"))
-global ufFilterCombo := MainGui.Add("ComboBox", "x242 y322 w128 h21 r8", [])
+global ufFilterCombo := MainGui.Add("ComboBox", "x242 y320 w128 h21 r8", [])
 ufFilterCombo.SetFont("s8 c000000", "Segoe UI")
-ufAddBtn := DarkBtn(MainGui, "x374 y322 w18 h21", "+", _RED_BGR, _DK_BG, -11, true)
+ufAddBtn := DarkBtn(MainGui, "x374 y320 w18 h21", "+", _RED_BGR, _DK_BG, -11, true)
 ufAddBtn.OnEvent("Click", UfAddFilter)
-ufDelBtn := DarkBtn(MainGui, "x394 y322 w18 h21", "-", _RED_BGR, _DK_BG, -11, true)
+ufDelBtn := DarkBtn(MainGui, "x394 y320 w18 h21", "-", _RED_BGR, _DK_BG, -11, true)
 ufDelBtn.OnEvent("Click", UfRemoveFilter)
 
 ; --- RECONNECT ---
-MainGui.Add("Text", "x8 y347 w410 h1 +0x10")
+MainGui.Add("Text", "x8 y350 w410 h1 +0x10")
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x22 y353 w80", "Reconnect")
-MainGui.SetFont("s8 c888888", "Segoe UI")
-MainGui.Add("Text", "x104 y355 w200", "Hotkey sends reconnect to cmd bar")
-
+MainGui.Add("Text", "x14 y356 w80", "Reconnect")
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-MainGui.Add("Text", "x22 y375 w30 h20 +0x200", "Key:")
-global reconKeyEdit := MainGui.Add("Edit", "x54 y375 w70 h20", reconnectKey)
+MainGui.Add("Text", "x14 y376 w30 h20 +0x200", "Key:")
+global reconKeyEdit := MainGui.Add("Edit", "x46 y376 w60 h20", reconnectKey)
 reconKeyEdit.SetFont("s8 c000000", "Segoe UI")
-reconSetKeyBtn := DarkBtn(MainGui, "x127 y375 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
+reconSetKeyBtn := DarkBtn(MainGui, "x109 y376 w32 h20", "Set", _RED_BGR, _DK_BG, -11, false)
 reconSetKeyBtn.OnEvent("Click", ReconnectDetectKey)
-reconSaveKeyBtn := DarkBtn(MainGui, "x166 y375 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
+reconSaveKeyBtn := DarkBtn(MainGui, "x144 y376 w40 h20", "Save", _RED_BGR, _DK_BG, -11, false)
 reconSaveKeyBtn.OnEvent("Click", ReconnectSaveKey)
+
+; Vertical separator
+MainGui.Add("Text", "x195 y362 w1 h25 BackgroundFF4444")
+
+; --- LOG WATCH ---
+MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.Add("Text", "x210 y356 w80", "Log Watch")
+MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
+global logWatchBtn := DarkBtn(MainGui, "x210 y376 w100 h24", "Configure", _RED_BGR, _DK_BG, -11, false)
+logWatchBtn.OnEvent("Click", LogWatchToggle)
 
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2151,6 +2203,7 @@ try {
 PcRegisterInvHotkey()
 LoadHatchSettings()
 PinLoadSettings()
+TpLoadSettings()
 PcUpdateUI()
 MacroLoadAll()
 ImprintLoadConfig()
@@ -2158,6 +2211,8 @@ AcOcrLoadConfig()
 OBOcrLoadConfig()
 OBCharLoadServer()
 SvrLoadList()
+SimLoadSettings()
+LogWatchLoadSettings()
 UfLoadList()
 _ListLoad(cnNameList, ClaimAndNameEdit, "NameList")
 if (cnNameList.Length = 0) {
@@ -2482,6 +2537,627 @@ ReconnectHandler(*) {
     Sleep(100)
     Send("{Enter}")
     A_Clipboard := _savedClip
+}
+
+; --- LOG WATCH ---
+LogWatchToggle(*) {
+    global logWatchRunning, logWatchBtn
+    if (logWatchRunning) {
+        LwStopWatch()
+        DarkBtnText(logWatchBtn, "Configure")
+    } else {
+        LogWatchShowWizard()
+    }
+}
+
+LogWatchShowWizard(*) {
+    global logWatchWizard, logWatchWords, logWatchThreshold, logWatchScanW, logWatchScanH
+    global logWatchScanX, logWatchScanY, logWatchPreset, logWatchWebhook
+
+    if (IsSet(logWatchWizard) && logWatchWizard != "") {
+        try logWatchWizard.Destroy()
+    }
+
+    logWatchWizard := Gui("+AlwaysOnTop", "Log Watch Setup")
+    logWatchWizard.BackColor := "000000"
+    logWatchWizard.SetFont("s10 Bold cFF4444", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y16 w280", "Log Watch")
+    lwHelpBtn := DarkBtn(logWatchWizard, "x320 y14 w24 h24", "?", _RED_BGR, _DK_BG, -12, true)
+    lwHelpBtn.OnEvent("Click", LwShowHelp)
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+
+    logWatchWizard.Add("Text", "x16 y48 w80 h20 +0x200", "Preset:")
+    global lwPresetDDL := logWatchWizard.Add("DropDownList", "x100 y48 w200", ["Structures Destroyed", "Custom"])
+    lwPresetDDL.SetFont("s9 c000000", "Segoe UI")
+    lwPresetDDL.Value := 1
+    lwPresetDDL.OnEvent("Change", LwPresetChanged)
+
+    logWatchWizard.Add("Text", "x16 y78 w80 h20 +0x200", "Words:")
+    global lwWordsLbl := logWatchWizard.Add("Text", "x16 y78 w80 h20 +0x200", "Words:")
+    global lwWordsEdit := logWatchWizard.Add("Edit", "x100 y76 w200 h22", "Your,was,destroyed")
+    lwWordsEdit.SetFont("s9 c000000", "Segoe UI")
+
+    global lwThresholdY := 108
+    logWatchWizard.Add("Text", "x16 y108 w80 h20 +0x200", "Threshold:")
+    global lwThreshLbl := logWatchWizard.Add("Text", "x16 y108 w80 h20 +0x200", "Threshold:")
+    global lwThreshEdit := logWatchWizard.Add("Edit", "x100 y106 w60 h22", "3")
+    lwThreshEdit.SetFont("s9 c000000", "Segoe UI")
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x165 y110 w130", "occurrences in a row = trigger")
+
+    logWatchWizard.Add("Progress", "x16 y138 w318 h1 Background333333")
+
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y148 w300", "Scan Area: use Resize to adjust")
+    global lwScanBtn := DarkBtn(logWatchWizard, "x16 y170 w100 h24", "Resize", _RED_BGR, _DK_BG, -11, false)
+    lwScanBtn.OnEvent("Click", LwToggleResize)
+    global lwHideOverlayCB := logWatchWizard.Add("CheckBox", "x120 y172 w130 h16", "Hide scan outline")
+    lwHideOverlayCB.SetFont("s8 c888888", "Segoe UI")
+    lwHideOverlayCB.Value := logWatchHideOverlay ? 1 : 0
+    lwHideOverlayCB.OnEvent("Click", LwHideOverlayToggle)
+
+    global lwScanInfoTxt := logWatchWizard.Add("Text", "x16 y200 w310", logWatchScanX > 0 ? logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH : "Not set")
+    lwScanInfoTxt.SetFont("s8 c888888", "Segoe UI")
+
+    global lwStatusTxt := logWatchWizard.Add("Text", "x16 y200 w300", logWatchScanX > 0 ? "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH : "Scan area: not set")
+    lwStatusTxt.SetFont("s8 c888888", "Segoe UI")
+
+    logWatchWizard.Add("Progress", "x16 y218 w318 h1 Background333333")
+
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y228 w80 h20 +0x200", "Stagger:")
+    global lwStaggerCB := logWatchWizard.Add("CheckBox", "x80 y228 w14 h20")
+    lwStaggerCB.SetFont("s9 c000000", "Segoe UI")
+    lwStaggerCB.Value := logWatchStagger ? 1 : 0
+    lwStaggerCB.OnEvent("Click", LwStaggerChanged)
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x98 y230 w40 h20", "Mult:")
+    global lwStaggerMultEdit := logWatchWizard.Add("Edit", "x140 y228 w40 h20", logWatchStaggerMult)
+    lwStaggerMultEdit.SetFont("s9 c000000", "Segoe UI")
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x185 y230 w120", "x after 1st trigger")
+
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y252 w130 h20 +0x200", "Lock Reset (min):")
+    global lwLockResetCB := logWatchWizard.Add("CheckBox", "x150 y252 w14 h20")
+    lwLockResetCB.SetFont("s9 c000000", "Segoe UI")
+    lwLockResetCB.Value := logWatchLockReset ? 1 : 0
+    lwLockResetCB.OnEvent("Click", LwLockResetChanged)
+    global lwLockResetEdit := logWatchWizard.Add("Edit", "x168 y250 w50 h22", logWatchLockResetMin)
+    lwLockResetEdit.SetFont("s9 c000000", "Segoe UI")
+
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y278 w70 h20 +0x200", "Discord:")
+    global lwWebhookEdit := logWatchWizard.Add("Edit", "x90 y276 w178 h22", logWatchWebhook)
+    lwWebhookEdit.SetFont("s9 c000000", "Segoe UI")
+    global lwTestBtn := DarkBtn(logWatchWizard, "x272 y276 w50 h22", "Test", _RED_BGR, _DK_BG, -11, false)
+    lwTestBtn.OnEvent("Click", LwTestDiscord)
+
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y302 w70 h20 +0x200", "Ping ID:")
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwPingEdit := logWatchWizard.Add("Edit", "x90 y300 w178 h22", logWatchPing)
+    lwPingEdit.SetFont("s9 c000000", "Segoe UI")
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x272 y302 w70", "<@ID> / <@&RoleID>")
+
+    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y326 w318", "Use <@USERID> for a user ping or <@&ROLEID> for a role ping")
+
+    global lwStartBtn := DarkBtn(logWatchWizard, "x135 y350 w80 h28", "Start", _RED_BGR, _DK_BG, -12, false)
+    lwStartBtn.OnEvent("Click", LwStartWatch)
+
+    lwDiscordHelpBtn := DarkBtn(logWatchWizard, "x320 y350 w24 h28", "?", _RED_BGR, _DK_BG, -11, true)
+    lwDiscordHelpBtn.OnEvent("Click", LwShowDiscordHelp)
+
+    ; Load saved values into edit fields
+    if (logWatchThreshold > 0)
+        lwThreshEdit.Value := logWatchThreshold
+    if (logWatchWords.Length > 0) {
+        joined := ""
+        for i, w in logWatchWords
+            joined .= (i > 1 ? "," : "") . w
+        lwWordsEdit.Value := joined
+    }
+
+    logWatchWizard.OnEvent("Close", (*) => LwCloseWizard())
+    logWatchWizard.Show("w350 h420")
+    LwPresetChanged()
+}
+
+LwPresetChanged(*) {
+    global lwPresetDDL, lwWordsLbl, lwWordsEdit, lwThreshLbl, lwThreshEdit
+    global lwThresholdY
+    if (lwPresetDDL.Value = 1) {
+        ; Structures Destroyed - hide words
+        lwWordsLbl.Visible := false
+        lwWordsEdit.Visible := false
+        ; Move threshold up to where words was
+        lwThreshLbl.Y := 78
+        lwThreshEdit.Y := 76
+    } else {
+        ; Custom - show words
+        lwWordsLbl.Visible := true
+        lwWordsEdit.Visible := true
+        ; Move threshold back down
+        lwThreshLbl.Y := 108
+        lwThreshEdit.Y := 106
+    }
+}
+
+LwStaggerChanged(*) {
+    global lwStaggerCB, lwStaggerMultEdit
+    global logWatchStagger, logWatchStaggerMult
+    logWatchStagger := lwStaggerCB.Value ? true : false
+    logWatchStaggerMult := Integer(lwStaggerMultEdit.Value)
+    if (logWatchStaggerMult < 2)
+        logWatchStaggerMult := 2
+}
+
+LwToggleResize(*) {
+    global logWatchResizing, lwScanBtn
+    global acOcrResizing, imprintResizing
+    if (acOcrResizing) {
+        ToolTip(" Exit Craft OCR resize first", 0, 0)
+        SetTimer(() => ToolTip(), -1500)
+        return
+    }
+    if (IsSet(imprintResizing) && imprintResizing) {
+        ToolTip(" Exit Imprint resize first", 0, 0)
+        SetTimer(() => ToolTip(), -1500)
+        return
+    }
+    if (logWatchResizing) {
+        LwExitResize()
+        return
+    }
+    logWatchResizing := true
+    DarkBtnText(lwScanBtn, "Done")
+    ToolTip("Log Watch OCR: WASD=move  Arrows=resize  Enter=done  Esc=cancel", 0, 0)
+    LwShowScanOverlay()
+    try Hotkey("$Up",    LwResizeUp,    "On")
+    try Hotkey("$Down",  LwResizeDown,  "On")
+    try Hotkey("$Left",  LwResizeLeft,  "On")
+    try Hotkey("$Right", LwResizeRight, "On")
+    try Hotkey("$w",     LwMoveUp,      "On")
+    try Hotkey("$s",     LwMoveDown,    "On")
+    try Hotkey("$a",     LwMoveLeft,    "On")
+    try Hotkey("$d",     LwMoveRight,   "On")
+    try Hotkey("$Enter", LwResizeDone,  "On")
+    try Hotkey("$Escape", LwResizeCancel, "On")
+}
+
+LwExitResize() {
+    global logWatchResizing, lwScanBtn, lwScanInfoTxt, lwStatusTxt
+    if (!logWatchResizing)
+        return
+    logWatchResizing := false
+    DarkBtnText(lwScanBtn, "Resize")
+    try Hotkey("$Up",    "Off")
+    try Hotkey("$Down",  "Off")
+    try Hotkey("$Left",  "Off")
+    try Hotkey("$Right", "Off")
+    try Hotkey("$w",     "Off")
+    try Hotkey("$s",     "Off")
+    try Hotkey("$a",     "Off")
+    try Hotkey("$d",     "Off")
+    try Hotkey("$Enter", "Off")
+    try Hotkey("$Escape", "Off")
+    LwHideScanOverlay()
+    lwScanInfoTxt.Text := logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
+    lwStatusTxt.Text := "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
+    LogWatchSaveSettings()
+}
+
+LwHideOverlayToggle(*) {
+    global logWatchHideOverlay, lwHideOverlayCB, logWatchResizing
+    logWatchHideOverlay := lwHideOverlayCB.Value
+    if (logWatchHideOverlay && logWatchResizing)
+        LwHideScanOverlay()
+    else if (!logWatchHideOverlay && logWatchResizing)
+        LwShowScanOverlay()
+    LogWatchSaveSettings()
+}
+
+LwLockResetChanged(*) {
+    global lwLockResetCB, lwLockResetEdit
+    global logWatchLockReset, logWatchLockResetSec
+    logWatchLockReset := lwLockResetCB.Value ? true : false
+    logWatchLockResetSec := Integer(lwLockResetEdit.Value)
+    if (logWatchLockResetSec < 5)
+        logWatchLockResetSec := 5
+}
+
+LwResizeCancel(*) {
+    global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    if (logWatchResizing) {
+        logWatchScanX := logWatchScanX_BeforeResize
+        logWatchScanY := logWatchScanY_BeforeResize
+        logWatchScanW := logWatchScanW_BeforeResize
+        logWatchScanH := logWatchScanH_BeforeResize
+        LwExitResize()
+    }
+}
+
+LwResizeDone(*) {
+    LwExitResize()
+}
+
+LwResizeUp(*) {
+    global logWatchScanH, logWatchScanY
+    logWatchScanH := Max(20, logWatchScanH - 10)
+    logWatchScanY := logWatchScanY + 5
+    LwShowScanOverlay()
+}
+LwResizeDown(*) {
+    global logWatchScanH
+    logWatchScanH := Max(20, logWatchScanH + 10)
+    LwShowScanOverlay()
+}
+LwResizeLeft(*) {
+    global logWatchScanW, logWatchScanX
+    logWatchScanW := Max(40, logWatchScanW - 10)
+    logWatchScanX := logWatchScanX + 5
+    LwShowScanOverlay()
+}
+LwResizeRight(*) {
+    global logWatchScanW
+    logWatchScanW := Max(40, logWatchScanW + 10)
+    LwShowScanOverlay()
+}
+LwMoveUp(*) {
+    global logWatchScanY
+    logWatchScanY := Max(0, logWatchScanY - 10)
+    LwShowScanOverlay()
+}
+LwMoveDown(*) {
+    global logWatchScanY
+    logWatchScanY := Min(A_ScreenHeight - 20, logWatchScanY + 10)
+    LwShowScanOverlay()
+}
+LwMoveLeft(*) {
+    global logWatchScanX
+    logWatchScanX := Max(0, logWatchScanX - 10)
+    LwShowScanOverlay()
+}
+LwMoveRight(*) {
+    global logWatchScanX
+    logWatchScanX := Min(A_ScreenWidth - 40, logWatchScanX + 10)
+    LwShowScanOverlay()
+}
+
+LwShowScanOverlay() {
+    global logWatchScanOverlay, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    global logWatchHideOverlay
+    LwHideScanOverlay()
+    if (logWatchHideOverlay)
+        return
+    b := 1
+    x := logWatchScanX, y := logWatchScanY, w := logWatchScanW, h := logWatchScanH
+    strips := [
+        [x-b, y-b, w+b*2, b],
+        [x-b, y+h, w+b*2, b],
+        [x-b, y,   b,     h],
+        [x+w, y,   b,     h]
+    ]
+    logWatchScanOverlay := []
+    for s in strips {
+        g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20")
+        g.BackColor := "FF0000"
+        WinSetTransparent(200, g)
+        g.Show("x" s[1] " y" s[2] " w" s[3] " h" s[4] " NoActivate")
+        logWatchScanOverlay.Push(g)
+    }
+}
+
+LwHideScanOverlay() {
+    global logWatchScanOverlay
+    if (logWatchScanOverlay == "" || logWatchScanOverlay == 0)
+        return
+    if (logWatchScanOverlay is Array) {
+        for g in logWatchScanOverlay
+            try g.Destroy()
+    }
+    logWatchScanOverlay := ""
+}
+
+LwSelectScanArea(*) {
+    global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    global logWatchScanX_BeforeResize, logWatchScanY_BeforeResize
+    global logWatchScanW_BeforeResize, logWatchScanH_BeforeResize
+    global logWatchWizard
+    global lwScanInfoTxt, lwStatusTxt
+
+    ; Save current values in case user presses Escape
+    logWatchScanX_BeforeResize := logWatchScanX
+    logWatchScanY_BeforeResize := logWatchScanY
+    logWatchScanW_BeforeResize := logWatchScanW
+    logWatchScanH_BeforeResize := logWatchScanH
+
+    try logWatchWizard.Hide()
+
+    Sleep(200)
+    ToolTip("Click and drag to select scan area...", 0, 0)
+
+    KeyWait("LButton", "D")
+    MouseGetPos(&startX, &startY)
+
+    while (GetKeyState("LButton", "P")) {
+        Sleep(10)
+    }
+
+    MouseGetPos(&endX, &endY)
+    ToolTip()
+
+    if (Abs(endX - startX) > 10 && Abs(endY - startY) > 10) {
+        logWatchScanX := Min(startX, endX)
+        logWatchScanY := Min(startY, endY)
+        logWatchScanW := Abs(endX - startX)
+        logWatchScanH := Abs(endY - startY)
+
+        try logWatchWizard.Show()
+        lwScanInfoTxt.Text := logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
+        lwStatusTxt.Text := "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
+        LogWatchSaveSettings()
+    } else {
+        try logWatchWizard.Show()
+        ToolTip("Area too small", 0, 0)
+        SetTimer(() => ToolTip(), -2000)
+    }
+}
+
+LwStartWatch(*) {
+    global logWatchEnabled, logWatchWords, logWatchThreshold, logWatchWebhook, logWatchPing
+    global lwWordsEdit, lwThreshEdit, lwWebhookEdit, lwPingEdit, lwStaggerCB, lwStaggerMultEdit, logWatchWizard
+    global lwLockResetCB, lwLockResetEdit
+    global logWatchStagger, logWatchStaggerMult, logWatchBtn, logWatchLockReset, logWatchLockResetSec
+
+    global logWatchWebhook := Trim(lwWebhookEdit.Value)
+    global logWatchPing := Trim(lwPingEdit.Value)
+    global logWatchStagger := lwStaggerCB.Value ? true : false
+    global logWatchStaggerMult := Integer(lwStaggerMultEdit.Value)
+    if (logWatchStaggerMult < 2)
+        logWatchStaggerMult := 2
+    global logWatchLockReset := lwLockResetCB.Value ? true : false
+    global logWatchLockResetMin := Integer(lwLockResetEdit.Value)
+    if (logWatchLockResetMin < 1)
+        logWatchLockResetMin := 1
+    LogWatchSaveSettings()
+
+    wordsStr := Trim(lwWordsEdit.Value)
+    if (wordsStr = "") {
+        ToolTip("Enter words to watch for", 0, 0)
+        SetTimer(() => ToolTip(), -2000)
+        return
+    }
+
+    logWatchWords := []
+    for _, w in StrSplit(wordsStr, ",") {
+        trimmed := Trim(w)
+        if (trimmed != "")
+            logWatchWords.Push(trimmed)
+    }
+
+    if (logWatchWords.Length = 0) {
+        ToolTip("Enter at least one word", 0, 0)
+        SetTimer(() => ToolTip(), -2000)
+        return
+    }
+
+    thresh := Integer(lwThreshEdit.Value)
+    if (thresh < 1)
+        thresh := 1
+    logWatchThreshold := thresh
+
+    global logWatchEnabled := true
+    global logWatchRunning := true
+    global logWatchConsecutive := 0
+    global logWatchTriggered := false
+    try logWatchWizard.Destroy()
+    global logWatchWizard := ""
+    DarkBtnText(logWatchBtn, "Stop")
+    staggerNote := logWatchStagger ? " (stagger " logWatchStaggerMult "x)" : ""
+    ToolTip("Log Watch started`nWatching for: " wordsStr "`nThreshold: " thresh staggerNote, 0, 0)
+    SetTimer(() => ToolTip(), -3000)
+    SetTimer(LwScanLoop, 500)
+}
+
+LwStopWatch() {
+    global logWatchRunning, logWatchEnabled, logWatchTriggered, logWatchBtn, logWatchConsecutive
+    logWatchRunning := false
+    logWatchEnabled := false
+    logWatchTriggered := false
+    logWatchConsecutive := 0
+    SetTimer(LwScanLoop, 0)
+    DarkBtnText(logWatchBtn, "Configure")
+    ToolTip("Log Watch stopped", 0, 0)
+    SetTimer(() => ToolTip(), -2000)
+}
+
+LwScanLoop() {
+    global logWatchRunning, logWatchEnabled, logWatchScanX, logWatchScanY
+    global logWatchScanW, logWatchScanH, logWatchWords, logWatchThreshold
+    global logWatchConsecutive, logWatchTriggered, logWatchStagger, logWatchStaggerMult
+    global logWatchLockReset, logWatchLockResetMin
+    static lockResetStartTime := 0
+
+    if (!logWatchRunning || !logWatchEnabled)
+        return
+
+    if (logWatchScanX = 0 || logWatchScanY = 0 || logWatchScanW <= 0 || logWatchScanH <= 0)
+        return
+
+    ocrText := ""
+    try {
+        ocrText := OCR.FromRect(logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, {scale: 2}).Text
+        ocrText := StrLower(ocrText)
+    } catch as e {
+        Sleep(100)
+        return
+    }
+
+    allFound := true
+    for _, word in logWatchWords {
+        if (!InStr(ocrText, StrLower(word))) {
+            allFound := false
+            break
+        }
+    }
+
+    if (allFound) {
+        global logWatchConsecutive := logWatchConsecutive + 1
+
+        if (logWatchTriggered) {
+            ; Already triggered once
+            if (logWatchLockReset && lockResetStartTime > 0) {
+                ; Check if lock reset timer expired (convert minutes to seconds)
+                elapsed := (A_TickCount - lockResetStartTime) / 1000
+                if (elapsed >= logWatchLockResetMin * 60) {
+                    ; Send another ping
+                    wordsStr := ""
+                    for i, w in logWatchWords {
+                        wordsStr .= (i > 1 ? ", " : "") w
+                    }
+                    LwSendDiscord(wordsStr)
+                    lockResetStartTime := A_TickCount ; Reset timer for next ping
+                }
+            }
+            return
+        }
+
+        ; Determine effective threshold
+        effectiveThresh := logWatchThreshold
+        if (logWatchStagger) {
+            effectiveThresh := logWatchThreshold * logWatchStaggerMult
+        }
+        if (logWatchConsecutive >= effectiveThresh) {
+            wordsStr := ""
+            for i, w in logWatchWords {
+                wordsStr .= (i > 1 ? ", " : "") w
+            }
+            LwSendDiscord(wordsStr)
+            global logWatchConsecutive := 0
+            global logWatchTriggered := true
+            if (logWatchLockReset) {
+                lockResetStartTime := A_TickCount
+            }
+        }
+    } else {
+        global logWatchConsecutive := 0
+        if (logWatchTriggered) {
+            global logWatchTriggered := false
+            lockResetStartTime := 0
+        }
+    }
+}
+
+LwTestDiscord(*) {
+    global lwWebhookEdit, lwPingEdit, lwTestBtn
+    webhook := Trim(lwWebhookEdit.Value)
+    if (webhook = "") {
+        ToolTip("Enter Discord webhook URL first", 0, 0)
+        SetTimer(() => ToolTip(), -2000)
+        return
+    }
+    ping := Trim(lwPingEdit.Value)
+    pingStr := ping != "" ? " " . ping : ""
+    discordJson := '{"content":"Test notification from Log Watch:' . pingStr . ' If you see this, your webhook is working!"}'
+    try {
+        WHR := ComObject("WinHttp.WinHttpRequest.5.1")
+        WHR.Open("POST", webhook, false)
+        WHR.SetRequestHeader("Content-Type", "application/json")
+        WHR.Send(discordJson)
+        DarkBtnText(lwTestBtn, "Sent!")
+        SetTimer(() => DarkBtnText(lwTestBtn, "Test"), -2000)
+    } catch {
+        ToolTip("Failed to send test", 0, 0)
+        SetTimer(() => ToolTip(), -2000)
+    }
+}
+
+LwSendDiscord(wordsStr) {
+    global logWatchWebhook, logWatchPing
+    if (logWatchWebhook = "")
+        return
+
+    ts := FormatTime(, "HH:mm:ss")
+    pingStr := ""
+    if (logWatchPing != "") {
+        pingStr := " " . logWatchPing
+    }
+    discordJson := '{"content":"[' . ts . '] Log Watch triggered:' . pingStr . ' ' . wordsStr . '"}'
+
+    try {
+        WHR := ComObject("WinHttp.WinHttpRequest.5.1")
+        WHR.Open("POST", logWatchWebhook, false)
+        WHR.SetRequestHeader("Content-Type", "application/json")
+        WHR.Send(discordJson)
+    }
+}
+
+LwCloseWizard(*) {
+    global logWatchWizard
+    try logWatchWizard.Destroy()
+    global logWatchWizard := ""
+}
+
+LwShowHelp(*) {
+    static hGui := ""
+    if IsObject(hGui) {
+        try hGui.Destroy()
+        hGui := ""
+        return
+    }
+    hGui := Gui("+AlwaysOnTop +ToolWindow", "Log Watch Help")
+    hGui.BackColor := "1A1A1A"
+    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.Add("Text", "x10 y8 w300", "LOG WATCH")
+    hGui.SetFont("s8 cDDDDDD", "Segoe UI")
+    hGui.Add("Text", "x10 y30 w300",
+        "Watches log via OCR and triggers when words appear.`n`n"
+        "Preset: Choose Structures Destroyed (default) or Custom.`n"
+        "Custom: enter words separated by commas.`n"
+        "Words must appear in any order in scanned region.`n`n"
+        "Threshold: consecutive detections before triggering.`n`n"
+        "Stagger: First trigger fires quickly, subsequent require`n"
+        " more detections (threshold x multiplier) to avoid spam.`n`n"
+        "Lock Reset: If words persist, re-triggers after X minutes.`n"
+        "Useful for repeated events that clear and reappear.`n`n"
+        "Discord webhook sends notification when triggered.")
+    hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
+    hGui.Show("w300 h200")
+}
+
+LwShowDiscordHelp(*) {
+    static hGui := ""
+    if IsObject(hGui) {
+        try hGui.Destroy()
+        hGui := ""
+        return
+    }
+    hGui := Gui("+AlwaysOnTop +ToolWindow", "Discord Ping Setup")
+    hGui.BackColor := "1A1A1A"
+    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.Add("Text", "x10 y8 w350", "DISCORD PING SETUP")
+    hGui.SetFont("s8 Bold cDDDDDD", "Segoe UI")
+    hGui.Add("Text", "x10 y30 w350", "--- HOW TO GET PINGED ---")
+    hGui.SetFont("s8 cDDDDDD", "Segoe UI")
+    hGui.Add("Text", "x10 y48 w350",
+        "1. Enable Developer Mode in Discord:`n"
+        "   User Settings > Advanced > Developer Mode`n`n"
+        "2. Copy the webhook URL:`n"
+        "   Server Settings > Integrations > Webhooks`n"
+        "   Copy webhook URL and paste into Discord field`n`n"
+        "3. To ping a user:`n"
+        "   Right-click your name > Copy User ID`n"
+        "   Enter in Ping ID: <@USER_ID>`n"
+        "   Example: <@123456789012345678>`n`n"
+        "4. To ping a role:`n"
+        "   Right-click a role > Copy Role ID`n"
+        "   Enter in Ping ID: <@&ROLE_ID>`n"
+        "   Example: <@&123456789012345678>")
+    hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
+    hGui.Show("w370 h280")
 }
 
 LoadHatchSettings() {
@@ -3850,7 +4526,8 @@ PinLogMsg(msg) {
 
 PinStartPoll() {
     global pinAutoOpen, pinPollActive, pinPollCount, arkwindow, invyDetectX, invyDetectY
-    if (!pinAutoOpen)
+    global tpAutoOpen
+    if (!pinAutoOpen && !tpAutoOpen)
         return
     if (pinPollActive) {
         SetTimer(PinPollCheck, 0)
@@ -3904,6 +4581,22 @@ PinPollCheck() {
         return
     }
 
+    ; Teleport screen detection
+    if (tpAutoOpen) {
+        try {
+            tp1 := NFSearchTol(&x, &y, tpPix1X, tpPix1Y, tpPix1X, tpPix1Y, "0xFFFFFF", tpTol)
+            tp2 := NFSearchTol(&x, &y, tpPix2X, tpPix2Y, tpPix2X, tpPix2Y, "0x3D1B00", tpTol)
+            if (tp1 && tp2) {
+                SetTimer(PinPollCheck, 0)
+                global pinPollActive := false
+                PinLogMsg("Teleport screen detected — clicking search bar")
+                Click(tpClickX " " tpClickY)
+                return
+            }
+        } catch {
+        }
+    }
+
     try {
         m2 := NFSearchTol(&x, &y, pinPix2X, pinPix2Y, pinPix2X, pinPix2Y, "0xC1F5FF", pinTol)
         if (!m2)
@@ -3943,6 +4636,22 @@ PinLoadSettings() {
         saved := IniRead(A_ScriptDir "\AIO_config.ini", "AutoPin", "Enabled", "1")
         global pinAutoOpen := (saved = "1")
         pinEnableBtn.Value := pinAutoOpen
+    }
+}
+
+TpSaveSettings() {
+    global tpAutoOpen
+    try {
+        IniWrite(tpAutoOpen ? 1 : 0, A_ScriptDir "\AIO_config.ini", "AutoTeleport", "Enabled")
+    }
+}
+
+TpLoadSettings() {
+    global tpAutoOpen, tpEnableBtn
+    try {
+        saved := IniRead(A_ScriptDir "\AIO_config.ini", "AutoTeleport", "Enabled", "1")
+        global tpAutoOpen := (saved = "1")
+        tpEnableBtn.Value := tpAutoOpen
     }
 }
 
@@ -9925,21 +10634,101 @@ SimSelectA(*) {
     global simMode := 1
     SimAChk.Value := 1
     SimBChk.Value := 0
+    IniWrite(1, A_ScriptDir "\AIO_config.ini", "JoinSim", "SimMode")
 }
 SimSelectB(*) {
     global simMode := 2
     SimBChk.Value := 1
     SimAChk.Value := 0
+    IniWrite(2, A_ScriptDir "\AIO_config.ini", "JoinSim", "SimMode")
 }
 
 SimToggleMods(*) {
     global modsEnabled := ModsChk.Value ? true : false
+    IniWrite(modsEnabled ? 1 : 0, A_ScriptDir "\AIO_config.ini", "JoinSim", "ModsEnabled")
 }
 SimToggleUseLast(*) {
     global useLast := UseLastChk.Value ? true : false
 }
 SimToggleTooltips(*) {
     global toolboxEnabled := ToolBoxChk.Value ? true : false
+}
+
+SimLoadSettings() {
+    global modsEnabled, simMode, ModsChk, SimAChk, SimBChk
+    configFile := A_ScriptDir "\AIO_config.ini"
+    try {
+        savedMods := Integer(IniRead(configFile, "JoinSim", "ModsEnabled", "0"))
+        global modsEnabled := (savedMods = 1)
+        ModsChk.Value := modsEnabled
+    }
+    try {
+        savedMode := Integer(IniRead(configFile, "JoinSim", "SimMode", "1"))
+        global simMode := savedMode
+        if (simMode = 1) {
+            SimAChk.Value := 1
+            SimBChk.Value := 0
+        } else {
+            SimAChk.Value := 0
+            SimBChk.Value := 1
+        }
+    }
+}
+
+LogWatchLoadSettings() {
+    global logWatchWebhook, logWatchPing, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
+    global logWatchStagger, logWatchStaggerMult, logWatchHideOverlay, logWatchLockReset, logWatchLockResetMin
+    configFile := A_ScriptDir "\AIO_config.ini"
+    try {
+        logWatchWebhook := IniRead(configFile, "LogWatch", "Webhook", "")
+        logWatchPing := IniRead(configFile, "LogWatch", "Ping", "")
+        savedHide := IniRead(configFile, "LogWatch", "HideOverlay", "0")
+        logWatchHideOverlay := (savedHide = "1")
+        savedLockReset := IniRead(configFile, "LogWatch", "LockReset", "0")
+        logWatchLockReset := (savedLockReset = "1")
+        savedLockResetMin := IniRead(configFile, "LogWatch", "LockResetMin", "1")
+        logWatchLockResetMin := Integer(savedLockResetMin)
+        if (logWatchLockResetMin < 1)
+            logWatchLockResetMin := 1
+        savedX := IniRead(configFile, "LogWatch", "ScanX", "")
+        savedY := IniRead(configFile, "LogWatch", "ScanY", "")
+        savedW := IniRead(configFile, "LogWatch", "ScanW", "")
+        savedH := IniRead(configFile, "LogWatch", "ScanH", "")
+        savedThresh := IniRead(configFile, "LogWatch", "Threshold", "3")
+        savedStagger := IniRead(configFile, "LogWatch", "Stagger", "0")
+        savedStaggerMult := IniRead(configFile, "LogWatch", "StaggerMult", "2")
+        if (savedX != "")
+            logWatchScanX := Integer(savedX)
+        if (savedY != "")
+            logWatchScanY := Integer(savedY)
+        if (savedW != "")
+            logWatchScanW := Integer(savedW)
+        if (savedH != "")
+            logWatchScanH := Integer(savedH)
+        logWatchThreshold := Integer(savedThresh)
+        logWatchStagger := (savedStagger = "1")
+        logWatchStaggerMult := Integer(savedStaggerMult)
+        if (logWatchStaggerMult < 2)
+            logWatchStaggerMult := 2
+    }
+}
+
+LogWatchSaveSettings() {
+    global logWatchWebhook, logWatchPing, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
+    global logWatchStagger, logWatchStaggerMult, logWatchHideOverlay, logWatchLockReset, logWatchLockResetMin
+    configFile := A_ScriptDir "\AIO_config.ini"
+    IniWrite(logWatchWebhook, configFile, "LogWatch", "Webhook")
+    IniWrite(logWatchPing, configFile, "LogWatch", "Ping")
+    IniWrite(logWatchScanX, configFile, "LogWatch", "ScanX")
+    IniWrite(logWatchScanY, configFile, "LogWatch", "ScanY")
+    IniWrite(logWatchScanW, configFile, "LogWatch", "ScanW")
+    IniWrite(logWatchScanH, configFile, "LogWatch", "ScanH")
+    IniWrite(logWatchThreshold, configFile, "LogWatch", "Threshold")
+    IniWrite(logWatchStagger ? "1" : "0", configFile, "LogWatch", "Stagger")
+    IniWrite(logWatchStaggerMult, configFile, "LogWatch", "StaggerMult")
+    IniWrite(logWatchHideOverlay ? "1" : "0", configFile, "LogWatch", "HideOverlay")
+    IniWrite(logWatchLockReset ? "1" : "0", configFile, "LogWatch", "LockReset")
+    IniWrite(logWatchLockResetMin, configFile, "LogWatch", "LockResetMin")
 }
 
 CheckState() {
@@ -10095,6 +10884,8 @@ SimLoopA() {
         global nosessions := 0
         global SM := 0
         global MM := 0
+        if (!useLast)
+            global simJoinFailed := true
         return
     }
 
@@ -10114,6 +10905,8 @@ SimLoopA() {
             UpdateSimStatus("Server Full - retrying")
             SendWindow("{Enter}")
             Sleep(100)
+            if (!useLast)
+                global simJoinFailed := true
             ClickWindow(BackOffsetX, BackOffsetY)
             Sleep(500)
             global JL := 0
@@ -10123,6 +10916,8 @@ SimLoopA() {
             UpdateSimStatus("Connection Timeout - backing out")
             SendWindow("{Enter}")
             Sleep(100)
+            if (!useLast)
+                global simJoinFailed := true
             ClickWindow(BackOffsetX, BackOffsetY)
             Sleep(500)
             ClickWindow(BackOffsetX, BackOffsetY)
@@ -10164,6 +10959,8 @@ SimLoopA() {
                 SimLogMsg("[" simCycleCount "] WaitingToJoin — WM=" WM "/180")
             if (WM >= 180) {
                 SimLogMsg("[" simCycleCount "] WaitingToJoin — timeout, backing out")
+                if (!useLast)
+                    global simJoinFailed := true
                 ClickWindow(BackOffsetX, BackOffsetY)
                 WM := 0
             }
@@ -10172,13 +10969,14 @@ SimLoopA() {
             global SM
             SM++
             UpdateSimStatus("Server Browser - waiting (" SM "/40)")
+            effectiveUseLast := useLast || simJoinFailed
             if (SM >= 40 || !simInitialSearchDone) {
                 SM := 0
-                if (useLast) {
+                if (effectiveUseLast) {
                     global JL
                     JL++
-                    SimLogMsg("[" simCycleCount "] ServerBrowser — JoinLast (" JL "/40)")
-                    UpdateSimStatus("Server Browser - Join Last (" JL "/40)")
+                    SimLogMsg("[" simCycleCount "] ServerBrowser — JoinLast (" JL "/40) [simJoinFailed=" simJoinFailed "]")
+                    UpdateSimStatus("Server Browser (" JL "/40)")
                     if (JL >= 40) {
                         SimLogMsg("[" simCycleCount "] ServerBrowser — JoinLast failed 40 times, backing out")
                         ClickWindow(BackOffsetX, BackOffsetY)
@@ -10194,7 +10992,10 @@ SimLoopA() {
                     UpdateSimStatus("Server Browser - searching")
                     ClickWindow(ServerSearchOffsetX, ServerSearchOffsetY)
                     Sleep(100)
-                    SendWindow("{Ctrl down}a{Ctrl up}")
+                    Loop(25)
+                    {
+                        SendWindow("{BackSpace}")
+                    }
                     Sleep(100)
                     SendWindowText(ServerNumberEdit.Text)
                     Sleep(200)
@@ -10269,6 +11070,8 @@ SimLoopB() {
         Sleep(500)
         global stuckCount := 0
         global nosessions := 0
+        if (!useLast)
+            global simJoinFailed := true
         return
     }
 
@@ -10283,12 +11086,16 @@ SimLoopB() {
             UpdateSimStatus("Server Full")
             SendWindow("{Enter}")
             Sleep(100)
+            if (!useLast)
+                global simJoinFailed := true
             ClickWindow(BackOffsetX, BackOffsetY)
         case "ConnectionTimeout":
             SimLogMsg("[" simCycleCount "] B ConnectionTimeout — Enter + double Back")
             UpdateSimStatus("Connection Timeout")
             SendWindow("{Enter}")
             Sleep(100)
+            if (!useLast)
+                global simJoinFailed := true
             ClickWindow(BackOffsetX, BackOffsetY)
             Sleep(500)
             ClickWindow(BackOffsetX, BackOffsetY)
@@ -10310,19 +11117,23 @@ SimLoopB() {
             UpdateSimStatus("Server Selected")
             ClickWindow(ServerJoinOffsetX, ServerJoinOffsetY)
         case "ServerBrowser":
-            SimLogMsg("[" simCycleCount "] B ServerBrowser — searching")
-            if (!useLast) {
+            SimLogMsg("[" simCycleCount "] B ServerBrowser — [simJoinFailed=" simJoinFailed "]")
+            effectiveUseLast := useLast || simJoinFailed
+            if (!effectiveUseLast) {
                 UpdateSimStatus("Server Browser - searching")
                 ClickWindow(ServerSearchOffsetX, ServerSearchOffsetY)
                 Sleep(100)
-                SendWindow("{Ctrl down}a{Ctrl up}")
+                Loop(25)
+                {
+                    SendWindow("{BackSpace}")
+                }
                 Sleep(100)
                 SendWindowText(ServerNumberEdit.Text)
                 Sleep(200)
                 ClickWindow(ClickSessionBOffsetX, ClickSessionBOffsetY)
                 global simInitialSearchDone := true
             } else {
-                UpdateSimStatus("Server Browser - Join Last")
+                UpdateSimStatus("Server Browser")
                 ClickWindow(JoinLastOffsetX, JoinLastOffsetY)
                 global simInitialSearchDone := true
             }
@@ -10433,6 +11244,7 @@ AutoSimButtonToggle(*) {
         global simCycleCount := 0
         global searchDone := false
         global simInitialSearchDone := false
+        global simJoinFailed := false
         global stuckState := ""
         global stuckCount := 0
         global simLog := []
@@ -16725,6 +17537,9 @@ $F1:: {
             SetTimer(PinPollCheck, 0)
             global pinPollActive := false
         }
+        if (logWatchRunning) {
+            LwStopWatch()
+        }
         global runMagicFScript       := false
         global magicFPresetIdx       := 1
         global gmkMode               := "off"
@@ -17644,6 +18459,20 @@ F11:: {
     } else
         out .= "(no pin log entries)`n"
 
+    out .= "`n--- Auto Teleport ---`n"
+    out .= "Enabled: " (tpAutoOpen ? "ON" : "OFF") "`n"
+    try {
+        tp1Col := PixelGetColor(tpPix1X, tpPix1Y)
+        tp2Col := PixelGetColor(tpPix2X, tpPix2Y)
+        tp1Match := NFSearchTol(&_tx, &_ty, tpPix1X, tpPix1Y, tpPix1X, tpPix1Y, "0xFFFFFF", tpTol)
+        tp2Match := NFSearchTol(&_tx, &_ty, tpPix2X, tpPix2Y, tpPix2X, tpPix2Y, "0x3D1B00", tpTol)
+        out .= "Pix1 (" tpPix1X "," tpPix1Y "): " tp1Col " expect 0xFFFFFF " (tp1Match ? "MATCH" : "no") "`n"
+        out .= "Pix2 (" tpPix2X "," tpPix2Y "): " tp2Col " expect 0x3D1B00 " (tp2Match ? "MATCH" : "no") "`n"
+    } catch {
+        out .= "(could not read teleport pixels)`n"
+    }
+    out .= "Click target: (" tpClickX "," tpClickY ")  tol: " tpTol "`n"
+
     out .= "`n=== NVIDIA FILTER (Per-Step Calibration) ===`n"
     out .= "Enabled: " (nfEnabled ? "ON" : "OFF") "`n"
     if (nfEnabled)
@@ -17686,6 +18515,10 @@ F11:: {
     out .= _DebugPxCheck("pinPix2", pinPix2X, pinPix2Y, 0xC1F5FF, 60)
     out .= _DebugPxCheck("pinPix3", pinPix3X, pinPix3Y, 0xC1F5FF, 60)
     out .= _DebugPxCheck("pinPix4", pinPix4X, pinPix4Y, 0xC1F5FF, 60)
+
+    out .= "`n--- Auto Teleport ---`n"
+    out .= _DebugPxCheck("tpPix1", tpPix1X, tpPix1Y, 0xFFFFFF, 60)
+    out .= _DebugPxCheck("tpPix2", tpPix2X, tpPix2Y, 0x3D1B00, 60)
 
     out .= "`n--- Macros (Guided/Combo) ---`n"
     out .= _DebugPxCheck("pcInvDetect", pcInvDetectX, pcInvDetectY, 0xFFFFFF)
