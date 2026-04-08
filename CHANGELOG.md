@@ -2,6 +2,8 @@
 
 ---
 
+Added Auto Teleport on Misc tab (E at teleport screen clicks the search bar)
+
 Fixed OB upload timer OCR not recognizing timer text by increasing scale from 2 to 3
 
 Fixed OB upload timer OCR region too small, now covers full left-side inventory area

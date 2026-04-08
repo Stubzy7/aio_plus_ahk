@@ -335,6 +335,16 @@ global pinPix4Y  := Round(405  * heightmultiplier)
 global pinClickX := Round(1275 * widthmultiplier)
 global pinClickY := Round(999  * heightmultiplier)
 
+; --- Auto Teleport ---
+global tpAutoOpen := true
+global tpPix1X  := Round(437 * widthmultiplier)
+global tpPix1Y  := Round(236 * heightmultiplier)
+global tpPix2X  := Round(628 * widthmultiplier)
+global tpPix2Y  := Round(299 * heightmultiplier)
+global tpClickX := Round(553 * widthmultiplier)
+global tpClickY := Round(1289 * heightmultiplier)
+global tpTol    := 30
+
 ; --- Grab My Kit ---
 global gmkMode := "off"
 
@@ -1897,16 +1907,21 @@ iniSaveCustomBtn.OnEvent("Click", IniSaveCustomCommand)
 global miscSetKeysBtn := DarkBtn(MainGui, "x22 y310 w70 h20", "Set Keys", _RED_BGR, _DK_BG, -11, true)
 miscSetKeysBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
 
-; --- AUTO PIN / NVIDIA FILTER ---
+; --- AUTO PIN / AUTO TELEPORT / NVIDIA FILTER ---
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x122 y310 w10 h40 +0x200", "|")
+MainGui.Add("Text", "x122 y310 w10 h60 +0x200", "|")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global pinEnableBtn := MainGui.Add("CheckBox", "x136 y310 w80 h20", "Auto Pin")
 pinEnableBtn.Value := pinAutoOpen
 pinEnableBtn.OnEvent("Click", PinToggle)
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
-global nfEnableBtn := MainGui.Add("CheckBox", "x136 y330 w120 h20", "NVIDIA Filter")
+global tpEnableBtn := MainGui.Add("CheckBox", "x136 y330 w120 h20", "Auto Teleport")
+tpEnableBtn.Value := tpAutoOpen
+tpEnableBtn.OnEvent("Click", TpToggle)
+
+MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
+global nfEnableBtn := MainGui.Add("CheckBox", "x136 y350 w120 h20", "NVIDIA Filter")
 nfEnableBtn.Value := nfEnabled
 nfEnableBtn.OnEvent("Click", NFToggle)
 
@@ -1915,6 +1930,12 @@ PinToggle(*) {
     global pinAutoOpen, pinEnableBtn
     pinAutoOpen := pinEnableBtn.Value
     PinSaveSettings()
+}
+
+TpToggle(*) {
+    global tpAutoOpen, tpEnableBtn
+    tpAutoOpen := tpEnableBtn.Value
+    TpSaveSettings()
 }
 
 NFToggle(*) {
@@ -1995,19 +2016,19 @@ ufDelBtn := DarkBtn(MainGui, "x394 y322 w18 h21", "-", _RED_BGR, _DK_BG, -11, tr
 ufDelBtn.OnEvent("Click", UfRemoveFilter)
 
 ; --- RECONNECT ---
-MainGui.Add("Text", "x8 y347 w410 h1 +0x10")
+MainGui.Add("Text", "x8 y367 w410 h1 +0x10")
 MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-MainGui.Add("Text", "x22 y353 w80", "Reconnect")
+MainGui.Add("Text", "x22 y373 w80", "Reconnect")
 MainGui.SetFont("s8 c888888", "Segoe UI")
-MainGui.Add("Text", "x104 y355 w200", "Hotkey sends reconnect to cmd bar")
+MainGui.Add("Text", "x104 y375 w200", "Hotkey sends reconnect to cmd bar")
 
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-MainGui.Add("Text", "x22 y375 w30 h20 +0x200", "Key:")
-global reconKeyEdit := MainGui.Add("Edit", "x54 y375 w70 h20", reconnectKey)
+MainGui.Add("Text", "x22 y395 w30 h20 +0x200", "Key:")
+global reconKeyEdit := MainGui.Add("Edit", "x54 y395 w70 h20", reconnectKey)
 reconKeyEdit.SetFont("s8 c000000", "Segoe UI")
-reconSetKeyBtn := DarkBtn(MainGui, "x127 y375 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
+reconSetKeyBtn := DarkBtn(MainGui, "x127 y395 w36 h20", "Set", _RED_BGR, _DK_BG, -11, false)
 reconSetKeyBtn.OnEvent("Click", ReconnectDetectKey)
-reconSaveKeyBtn := DarkBtn(MainGui, "x166 y375 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
+reconSaveKeyBtn := DarkBtn(MainGui, "x166 y395 w44 h20", "Save", _RED_BGR, _DK_BG, -11, false)
 reconSaveKeyBtn.OnEvent("Click", ReconnectSaveKey)
 
 
@@ -2151,6 +2172,7 @@ try {
 PcRegisterInvHotkey()
 LoadHatchSettings()
 PinLoadSettings()
+TpLoadSettings()
 PcUpdateUI()
 MacroLoadAll()
 ImprintLoadConfig()
@@ -3850,7 +3872,8 @@ PinLogMsg(msg) {
 
 PinStartPoll() {
     global pinAutoOpen, pinPollActive, pinPollCount, arkwindow, invyDetectX, invyDetectY
-    if (!pinAutoOpen)
+    global tpAutoOpen
+    if (!pinAutoOpen && !tpAutoOpen)
         return
     if (pinPollActive) {
         SetTimer(PinPollCheck, 0)
@@ -3904,6 +3927,22 @@ PinPollCheck() {
         return
     }
 
+    ; Teleport screen detection
+    if (tpAutoOpen) {
+        try {
+            tp1 := NFSearchTol(&x, &y, tpPix1X, tpPix1Y, tpPix1X, tpPix1Y, "0xFFFFFF", tpTol)
+            tp2 := NFSearchTol(&x, &y, tpPix2X, tpPix2Y, tpPix2X, tpPix2Y, "0x3D1B00", tpTol)
+            if (tp1 && tp2) {
+                SetTimer(PinPollCheck, 0)
+                global pinPollActive := false
+                PinLogMsg("Teleport screen detected — clicking search bar")
+                Click(tpClickX " " tpClickY)
+                return
+            }
+        } catch {
+        }
+    }
+
     try {
         m2 := NFSearchTol(&x, &y, pinPix2X, pinPix2Y, pinPix2X, pinPix2Y, "0xC1F5FF", pinTol)
         if (!m2)
@@ -3943,6 +3982,22 @@ PinLoadSettings() {
         saved := IniRead(A_ScriptDir "\AIO_config.ini", "AutoPin", "Enabled", "1")
         global pinAutoOpen := (saved = "1")
         pinEnableBtn.Value := pinAutoOpen
+    }
+}
+
+TpSaveSettings() {
+    global tpAutoOpen
+    try {
+        IniWrite(tpAutoOpen ? 1 : 0, A_ScriptDir "\AIO_config.ini", "AutoTeleport", "Enabled")
+    }
+}
+
+TpLoadSettings() {
+    global tpAutoOpen, tpEnableBtn
+    try {
+        saved := IniRead(A_ScriptDir "\AIO_config.ini", "AutoTeleport", "Enabled", "1")
+        global tpAutoOpen := (saved = "1")
+        tpEnableBtn.Value := tpAutoOpen
     }
 }
 
@@ -17644,6 +17699,20 @@ F11:: {
     } else
         out .= "(no pin log entries)`n"
 
+    out .= "`n--- Auto Teleport ---`n"
+    out .= "Enabled: " (tpAutoOpen ? "ON" : "OFF") "`n"
+    try {
+        tp1Col := PixelGetColor(tpPix1X, tpPix1Y)
+        tp2Col := PixelGetColor(tpPix2X, tpPix2Y)
+        tp1Match := NFSearchTol(&_tx, &_ty, tpPix1X, tpPix1Y, tpPix1X, tpPix1Y, "0xFFFFFF", tpTol)
+        tp2Match := NFSearchTol(&_tx, &_ty, tpPix2X, tpPix2Y, tpPix2X, tpPix2Y, "0x3D1B00", tpTol)
+        out .= "Pix1 (" tpPix1X "," tpPix1Y "): " tp1Col " expect 0xFFFFFF " (tp1Match ? "MATCH" : "no") "`n"
+        out .= "Pix2 (" tpPix2X "," tpPix2Y "): " tp2Col " expect 0x3D1B00 " (tp2Match ? "MATCH" : "no") "`n"
+    } catch {
+        out .= "(could not read teleport pixels)`n"
+    }
+    out .= "Click target: (" tpClickX "," tpClickY ")  tol: " tpTol "`n"
+
     out .= "`n=== NVIDIA FILTER (Per-Step Calibration) ===`n"
     out .= "Enabled: " (nfEnabled ? "ON" : "OFF") "`n"
     if (nfEnabled)
@@ -17686,6 +17755,10 @@ F11:: {
     out .= _DebugPxCheck("pinPix2", pinPix2X, pinPix2Y, 0xC1F5FF, 60)
     out .= _DebugPxCheck("pinPix3", pinPix3X, pinPix3Y, 0xC1F5FF, 60)
     out .= _DebugPxCheck("pinPix4", pinPix4X, pinPix4Y, 0xC1F5FF, 60)
+
+    out .= "`n--- Auto Teleport ---`n"
+    out .= _DebugPxCheck("tpPix1", tpPix1X, tpPix1Y, 0xFFFFFF, 60)
+    out .= _DebugPxCheck("tpPix2", tpPix2X, tpPix2Y, 0x3D1B00, 60)
 
     out .= "`n--- Macros (Guided/Combo) ---`n"
     out .= _DebugPxCheck("pcInvDetect", pcInvDetectX, pcInvDetectY, 0xFFFFFF)
