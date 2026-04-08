@@ -305,10 +305,10 @@ global obDownBarSettleMs   := 12000
 global obOcrResizing   := false
 global obOcrTarget     := 0
 global obOcrOverlays   := ""
-global obOcrX          := [Round(270 * widthmultiplier), Round(640 * widthmultiplier), Round(1630 * widthmultiplier), Round(640 * widthmultiplier), Round(239 * widthmultiplier)]
-global obOcrY          := [Round(365 * heightmultiplier), Round(440 * heightmultiplier), Round(325 * heightmultiplier), Round(440 * heightmultiplier), Round(301 * heightmultiplier)]
-global obOcrW          := [Round(80  * widthmultiplier), Round(640 * widthmultiplier), Round(150 * widthmultiplier), Round(640 * widthmultiplier), Round(757 * widthmultiplier)]
-global obOcrH          := [Round(40  * heightmultiplier), Round(60 * heightmultiplier), Round(40 * heightmultiplier), Round(60 * heightmultiplier), Round(816 * heightmultiplier)]
+global obOcrX          := [Round(270 * widthmultiplier), Round(640 * widthmultiplier), Round(1630 * widthmultiplier), Round(640 * widthmultiplier), Round(240 * widthmultiplier)]
+global obOcrY          := [Round(365 * heightmultiplier), Round(440 * heightmultiplier), Round(325 * heightmultiplier), Round(440 * heightmultiplier), Round(313 * heightmultiplier)]
+global obOcrW          := [Round(80  * widthmultiplier), Round(640 * widthmultiplier), Round(150 * widthmultiplier), Round(640 * widthmultiplier), Round(736 * widthmultiplier)]
+global obOcrH          := [Round(40  * heightmultiplier), Round(60 * heightmultiplier), Round(40 * heightmultiplier), Round(60 * heightmultiplier), Round(788 * heightmultiplier)]
 
 ; --- NVIDIA Filter---
 global nfEnabled := false
@@ -10137,8 +10137,6 @@ SimLoopA() {
                 Sleep(100)
                 SendWindow("{Ctrl down}a{Ctrl up}")
                 Sleep(100)
-                SendWindow("{BackSpace}")
-                Sleep(100)
                 SendWindowText(ServerNumberEdit.Text)
                 Sleep(200)
                 ClickWindow(ClickSessionOffsetX, ClickSessionOffsetY)
@@ -10197,8 +10195,6 @@ SimLoopA() {
                     ClickWindow(ServerSearchOffsetX, ServerSearchOffsetY)
                     Sleep(100)
                     SendWindow("{Ctrl down}a{Ctrl up}")
-                    Sleep(100)
-                    SendWindow("{BackSpace}")
                     Sleep(100)
                     SendWindowText(ServerNumberEdit.Text)
                     Sleep(200)
@@ -10304,8 +10300,6 @@ SimLoopB() {
                 Sleep(100)
                 SendWindow("{Ctrl down}a{Ctrl up}")
                 Sleep(100)
-                SendWindow("{BackSpace}")
-                Sleep(100)
                 SendWindowText(ServerNumberEdit.Text)
                 Sleep(200)
                 ClickWindow(ClickSessionBOffsetX, ClickSessionBOffsetY)
@@ -10322,8 +10316,6 @@ SimLoopB() {
                 ClickWindow(ServerSearchOffsetX, ServerSearchOffsetY)
                 Sleep(100)
                 SendWindow("{Ctrl down}a{Ctrl up}")
-                Sleep(100)
-                SendWindow("{BackSpace}")
                 Sleep(100)
                 SendWindowText(ServerNumberEdit.Text)
                 Sleep(200)
@@ -11600,7 +11592,7 @@ OBUploadCharacterThread() {
             scanY := obOcrY[5]
             scanW := obOcrW[5]
             scanH := obOcrH[5]
-            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 2}).Text
+            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 3}).Text
             obLog.Push("Timer OCR (" scanX "," scanY " " scanW "x" scanH "): [" SubStr(tOcr, 1, 200) "]")
             maxSec := 0
             startPos := 1
@@ -11646,7 +11638,7 @@ OBUploadCharacterThread() {
             scanY := obOcrY[5]
             scanW := obOcrW[5]
             scanH := obOcrH[5]
-            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 2}).Text
+            tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 3}).Text
             obLog.Push("Re-check OCR: [" SubStr(tOcr, 1, 200) "]")
             maxSec := 0
             startPos := 1
@@ -12411,6 +12403,24 @@ OBCheckUploadTimer(filter := "") {
     }
     Sleep(200)
 
+    dataWaitStart := A_TickCount
+    waitCount := 0
+    while (obUploadRunning && waitCount < 500) {
+        try {
+            dc := PxGet(obDataLoadedPixX, obDataLoadedPixY)
+            dr := (dc >> 16) & 0xFF
+            dg := (dc >> 8)  & 0xFF
+            db := dc         & 0xFF
+            if (dr > 130 && dr < 190 && dg > 180 && dg < 230 && db > 195 && db < 245)
+                break
+        }
+        Sleep(16)
+        waitCount++
+    }
+    dataWaitMs := A_TickCount - dataWaitStart
+    obLog.Push("Timer check: data load wait " dataWaitMs "ms (" waitCount " polls)")
+    Sleep(200)
+
     if (filter != "") {
         obLog.Push("Timer check: filtering [" filter "]")
         ControlClick("x" mySearchBarX " y" mySearchBarY, arkwindow)
@@ -12424,7 +12434,7 @@ OBCheckUploadTimer(filter := "") {
     scanH := obOcrH[5]
     timerSec := 0
     try {
-        tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 2}).Text
+        tOcr := OCR.FromRect(scanX, scanY, scanW, scanH, {scale: 3}).Text
         obLog.Push("Timer OCR (" scanX "," scanY " " scanW "x" scanH "): [" SubStr(tOcr, 1, 200) "]")
         maxSec := 0
         startPos := 1

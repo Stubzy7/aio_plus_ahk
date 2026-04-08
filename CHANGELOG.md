@@ -2,6 +2,12 @@
 
 ---
 
+Fixed OB upload timer OCR not recognizing timer text by increasing scale from 2 to 3
+
+Fixed OB upload timer OCR region too small, now covers full left-side inventory area
+Fixed OB upload timer check firing on empty inventory before data loads
+
+Fixed join sim search field clearing causing wrong server list to flash
 Fixed Q cycling when depo eggs and hatch are both selected
 Fixed quick feed cycle-to-off showing the GUI
 Upload char alternates between custom server and 2386 on F6 re-arm
