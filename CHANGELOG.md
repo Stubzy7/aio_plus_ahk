@@ -2,6 +2,14 @@
 
 ---
 
+Fixed Log Watch re-triggering too fast when lock reset was enabled
+Log Watch Discord now uses <@id> ping format and relative timestamps
+Log Watch shows preset name in Discord message instead of raw detection words
+Log Watch shows persistent status tooltip at top of screen while running
+Log Watch ping ID field now uses @ prefix with automatic <@id> wrapping
+
+---
+
 Added Auto Teleport on Misc tab (E at teleport screen clicks the search bar)
 
 Fixed OB upload timer OCR not recognizing timer text by increasing scale from 2 to 3

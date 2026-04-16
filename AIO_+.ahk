@@ -360,6 +360,7 @@ global logWatchWords := []
 global logWatchPreset := "Default"
 global logWatchConsecutive := 0
 global logWatchOverlay := ""
+global logWatchDetectionLabel := ""
 global logWatchWizard := ""
 global logWatchWebhook := ""
 global logWatchPing := ""
@@ -2634,15 +2635,12 @@ LogWatchShowWizard(*) {
     lwTestBtn.OnEvent("Click", LwTestDiscord)
 
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y302 w70 h20 +0x200", "Ping ID:")
-    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
-    global lwPingEdit := logWatchWizard.Add("Edit", "x90 y300 w178 h22", logWatchPing)
+    logWatchWizard.Add("Text", "x16 y302 w20 h20", "@")
+    logWatchWizard.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    global lwPingEdit := logWatchWizard.Add("Edit", "x40 y300 w250 h22", logWatchPing)
     lwPingEdit.SetFont("s9 c000000", "Segoe UI")
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x272 y302 w70", "<@ID> / <@&RoleID>")
-
-    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y326 w318", "Use <@USERID> for a user ping or <@&ROLEID> for a role ping")
+    logWatchWizard.Add("Text", "x40 y326 w250", "Discord user ID — results in <@ID> ping")
 
     global lwStartBtn := DarkBtn(logWatchWizard, "x135 y350 w80 h28", "Start", _RED_BGR, _DK_BG, -12, false)
     lwStartBtn.OnEvent("Click", LwStartWatch)
@@ -2861,6 +2859,39 @@ LwHideScanOverlay() {
     logWatchScanOverlay := ""
 }
 
+; Persistent tooltip shown at top of screen while Log Watch is running
+global lwStatusTooltipGui := ""
+global lwStatusTooltipLabel := ""
+
+LwShowStatusTooltip(msg) {
+    global lwStatusTooltipGui, lwStatusTooltipLabel
+    LwHideStatusTooltip()
+    ; Create a small overlay at top-left corner of screen
+    lwStatusTooltipGui := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20")
+    lwStatusTooltipGui.BackColor := "1A1A1A"
+    lwStatusTooltipGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    lwStatusTooltipLabel := lwStatusTooltipGui.Add("Text",, msg)
+    ; Position at top-left
+    lwStatusTooltipGui.Show("x0 y0 NoActivate")
+}
+
+LwUpdateStatusTooltip(msg) {
+    global lwStatusTooltipGui, lwStatusTooltipLabel
+    if (lwStatusTooltipGui != "" && lwStatusTooltipLabel != "") {
+        try lwStatusTooltipLabel.Value := msg
+    } else {
+        LwShowStatusTooltip(msg)
+    }
+}
+
+LwHideStatusTooltip() {
+    global lwStatusTooltipGui
+    if (lwStatusTooltipGui != "") {
+        try lwStatusTooltipGui.Destroy()
+        lwStatusTooltipGui := ""
+    }
+}
+
 LwSelectScanArea(*) {
     global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
     global logWatchScanX_BeforeResize, logWatchScanY_BeforeResize
@@ -2949,6 +2980,13 @@ LwStartWatch(*) {
         thresh := 1
     logWatchThreshold := thresh
 
+    global logWatchDetectionLabel := ""
+    if (lwPresetDDL.Value = 1) {
+        logWatchDetectionLabel := "Your Structures were Destroyed"
+    } else {
+        logWatchDetectionLabel := wordsStr
+    }
+
     global logWatchEnabled := true
     global logWatchRunning := true
     global logWatchConsecutive := 0
@@ -2956,8 +2994,9 @@ LwStartWatch(*) {
     try logWatchWizard.Destroy()
     global logWatchWizard := ""
     DarkBtnText(logWatchBtn, "Stop")
-    staggerNote := logWatchStagger ? " (stagger " logWatchStaggerMult "x)" : ""
-    ToolTip("Log Watch started`nWatching for: " wordsStr "`nThreshold: " thresh staggerNote, 0, 0)
+    LwShowStatusTooltip("Log Watch | Detecting: " . logWatchDetectionLabel)
+    staggerNote := logWatchStagger ? " (stagger " . logWatchStaggerMult . "x)" : ""
+    ToolTip("Log Watch started`nWatching for: " . wordsStr . "`nThreshold: " . thresh . staggerNote, 0, 0)
     SetTimer(() => ToolTip(), -3000)
     SetTimer(LwScanLoop, 500)
 }
@@ -2970,6 +3009,7 @@ LwStopWatch() {
     logWatchConsecutive := 0
     SetTimer(LwScanLoop, 0)
     DarkBtnText(logWatchBtn, "Configure")
+    LwHideStatusTooltip()
     ToolTip("Log Watch stopped", 0, 0)
     SetTimer(() => ToolTip(), -2000)
 }
@@ -3019,7 +3059,8 @@ LwScanLoop() {
                         wordsStr .= (i > 1 ? ", " : "") w
                     }
                     LwSendDiscord(wordsStr)
-                    lockResetStartTime := A_TickCount ; Reset timer for next ping
+                    lockResetStartTime := A_TickCount
+                    logWatchConsecutive := 0
                 }
             }
             return
@@ -3060,8 +3101,15 @@ LwTestDiscord(*) {
         return
     }
     ping := Trim(lwPingEdit.Value)
-    pingStr := ping != "" ? " " . ping : ""
-    discordJson := '{"content":"Test notification from Log Watch:' . pingStr . ' If you see this, your webhook is working!"}'
+    pingMention := ping != "" ? "<@" . ping . ">" : ""
+    unixTs := DateDiff(A_NowUTC, "19700101000000", "Seconds")
+    parts := []
+    if (pingMention != "")
+        parts.Push(pingMention)
+    parts.Push("<t:" . unixTs . ":R>")
+    parts.Push("Test notification from Log Watch - if you see this, your webhook is working!")
+    content := StrJoin("`n", parts*)
+    discordJson := '{"content":"' . content . '"}'
     try {
         WHR := ComObject("WinHttp.WinHttpRequest.5.1")
         WHR.Open("POST", webhook, false)
@@ -3076,16 +3124,26 @@ LwTestDiscord(*) {
 }
 
 LwSendDiscord(wordsStr) {
-    global logWatchWebhook, logWatchPing
+    global logWatchWebhook, logWatchPing, logWatchDetectionLabel
     if (logWatchWebhook = "")
         return
 
-    ts := FormatTime(, "HH:mm:ss")
-    pingStr := ""
-    if (logWatchPing != "") {
-        pingStr := " " . logWatchPing
-    }
-    discordJson := '{"content":"[' . ts . '] Log Watch triggered:' . pingStr . ' ' . wordsStr . '"}'
+    ; Discord mention format <@user_id> or <@&role_id>
+    pingMention := logWatchPing != "" ? "<@" . logWatchPing . ">" : ""
+    ; Discord relative timestamp: <t:unix:R> shows "x time ago"
+    ; Compute Unix timestamp from system clock
+    unixTs := DateDiff(A_NowUTC, "19700101000000", "Seconds")
+    ; Message text: detection label (preset) or words (custom)
+    msgText := logWatchDetectionLabel != "" ? logWatchDetectionLabel : wordsStr
+
+    ; Build multi-line content: ping (optional), timestamp, message
+    contentParts := []
+    if (pingMention != "")
+        contentParts.Push(pingMention)
+    contentParts.Push("<t:" . unixTs . ":R>")
+    contentParts.Push(msgText)
+    content := StrJoin("`n", contentParts*)
+    discordJson := '{"content":"' . content . '"}'
 
     try {
         WHR := ComObject("WinHttp.WinHttpRequest.5.1")
@@ -3119,11 +3177,11 @@ LwShowHelp(*) {
         "Custom: enter words separated by commas.`n"
         "Words must appear in any order in scanned region.`n`n"
         "Threshold: consecutive detections before triggering.`n`n"
-        "Stagger: First trigger fires quickly, subsequent require`n"
-        " more detections (threshold x multiplier) to avoid spam.`n`n"
-        "Lock Reset: If words persist, re-triggers after X minutes.`n"
-        "Useful for repeated events that clear and reappear.`n`n"
-        "Discord webhook sends notification when triggered.")
+        "Stagger: after 1st trigger, require Threshold x Mult more`n"
+        " detections before re-triggering (avoids spam).`n`n"
+        "Lock Reset: if words persist, re-triggers after X min.`n`n"
+        "@ field: Discord user ID — results in <@ID> ping.`n"
+        "Discord message uses <t:timestamp:R> (relative time).")
     hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
     hGui.Show("w300 h200")
 }
@@ -3150,11 +3208,12 @@ LwShowDiscordHelp(*) {
         "   Copy webhook URL and paste into Discord field`n`n"
         "3. To ping a user:`n"
         "   Right-click your name > Copy User ID`n"
-        "   Enter in Ping ID: <@USER_ID>`n"
-        "   Example: <@123456789012345678>`n`n"
+        "   Paste the ID number into the @ field (no @ needed).`n"
+        "   It becomes <@ID> automatically.`n`n"
         "4. To ping a role:`n"
         "   Right-click a role > Copy Role ID`n"
-        "   Enter in Ping ID: <@&ROLE_ID>`n"
+        "   Paste the ID number into the @ field.`n"
+        "   Manually add <@&> prefix: <@&ID>`n"
         "   Example: <@&123456789012345678>")
     hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
     hGui.Show("w370 h280")
