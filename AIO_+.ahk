@@ -1,4 +1,4 @@
-﻿#Requires AutoHotkey v2.0
+#Requires AutoHotkey v2.0
 #SingleInstance Force
 #MaxThreadsPerHotkey 2
 SetKeyDelay -1, -1
@@ -93,7 +93,6 @@ global qhInvPixY    := Round(217 * heightmultiplier)
 global qhLogEntries  := []
 global qhClickDelay  := 1
 global depoEggsActive    := false
-global depoEmbryoActive  := false
 global depoCycle          := []
 global depoCycleIdx       := 0
 global qhEmptyPixX   := Round(1040 * widthmultiplier)
@@ -349,8 +348,18 @@ global tpTol    := 30
 global gmkMode := "off"
 
 ; --- Log Watch ---
+; Default scan area (base 2560x1440). Scales at runtime via LogWatchScaleScanArea().
+; Sourced from 1920x1080 measurement 172,167 1017x731 divided by 0.75 (= 1920/2560).
+global LOG_WATCH_DEFAULT_BASE_X := 229
+global LOG_WATCH_DEFAULT_BASE_Y := 223
+global LOG_WATCH_DEFAULT_BASE_W := 1356
+global LOG_WATCH_DEFAULT_BASE_H := 975
 global logWatchEnabled := false
 global logWatchRunning := false
+global logWatchScanBaseX := LOG_WATCH_DEFAULT_BASE_X
+global logWatchScanBaseY := LOG_WATCH_DEFAULT_BASE_Y
+global logWatchScanBaseW := LOG_WATCH_DEFAULT_BASE_W
+global logWatchScanBaseH := LOG_WATCH_DEFAULT_BASE_H
 global logWatchScanX := 0
 global logWatchScanY := 0
 global logWatchScanW := 300
@@ -364,6 +373,7 @@ global logWatchDetectionLabel := ""
 global logWatchWizard := ""
 global logWatchWebhook := ""
 global logWatchPing := ""
+global logWatchPingRole := false
 global logWatchStagger := false
 global logWatchStaggerMult := 2
 global logWatchTriggered := false
@@ -372,6 +382,21 @@ global logWatchResizing := false
 global logWatchHideOverlay := false
 global logWatchLockReset := false
 global logWatchLockResetMin := 1
+global logWatchAttachScreenshot := false
+; Auto-rejoin on disconnect (main menu / connection timeout). Uses JoinSim target server.
+global logWatchRejoinEnabled := true
+global logWatchRejoinInProgress := false
+global logWatchRejoinPhase := ""
+global logWatchDcConsecutive := 0
+global logWatchInGameConsecutive := 0
+global logWatchRejoinStartTick := 0
+global logWatchRejoinPhaseTick := 0
+global lwLog := []
+; Post-rejoin click coords at base 2560x1440 (sourced from 904,73 and 607,188 at 1920x1080).
+global LW_REJOIN_CLICK1_BASE_X := 1205
+global LW_REJOIN_CLICK1_BASE_Y := 97
+global LW_REJOIN_CLICK2_BASE_X := 809
+global LW_REJOIN_CLICK2_BASE_Y := 251
 global logWatchScanOverlay := ""
 global ntfykey := readini("ntfy", "key")
 if (ntfykey = "Default")
@@ -895,9 +920,77 @@ DarkBtnText(btn, newText) {
     DllCall("InvalidateRect", "Ptr", btn.Hwnd, "Ptr", 0, "Int", 1)
 }
 
-global _RED_BGR  := 0x4444FF    ; #FF4444
-global _GRAY_BGR := 0xDDDDDD    ; #DDDDDD
-global _DK_BG    := 0x1A1A1A    ; #1A1A1A
+global _themes := Map(
+    "Ares",    Map("hex", 0xDC143C, "name", "Ares"),
+    "Helios",  Map("hex", 0xFF6200, "name", "Helios"),
+    "Hermes",  Map("hex", 0xFFD700, "name", "Hermes"),
+    "Neptune", Map("hex", 0x00FFE4, "name", "Neptune"),
+    "Slate",   Map("hex", 0x4169E1, "name", "Slate"),
+    "Shade",   Map("hex", 0x7F00FF, "name", "Shade"),
+    "Mono",    Map("hex", 0xAAAAAA, "name", "Mono"),
+)
+
+ThemeLoadName() {
+    n := IniRead(A_ScriptDir "\AIO_config.ini", "Theme", "Name", "Ares")
+    n := Trim(n)
+    if (!_themes.Has(n))
+        n := "Ares"
+    return n
+}
+
+ThemeSaveName(n) {
+    if (!_themes.Has(n))
+        return
+    IniWrite(n, A_ScriptDir "\AIO_config.ini", "Theme", "Name")
+}
+
+ThemeRgbToBgr(rgb) {
+    r := (rgb >> 16) & 0xFF
+    g := (rgb >>  8) & 0xFF
+    b :=  rgb        & 0xFF
+    return (b << 16) | (g << 8) | r
+}
+
+ThemeAccentRgb() {
+    global _themeName, _themes
+    return _themes[_themeName]["hex"]
+}
+
+ThemeAccentRamp(n := 11) {
+    rgb := ThemeAccentRgb()
+    r := (rgb >> 16) & 0xFF, g := (rgb >> 8) & 0xFF, b := rgb & 0xFF
+    ramp := []
+    Loop n {
+        frac := (A_Index - 1) / (n - 1)
+        if (frac < 0.5) {
+            k := 0.25 + frac * 1.0
+            rr := Integer(r * k), gg := Integer(g * k), bb := Integer(b * k)
+        } else {
+            k := (frac - 0.5) * 2.0
+            rr := Integer(r + (255 - r) * k)
+            gg := Integer(g + (255 - g) * k)
+            bb := Integer(b + (255 - b) * k)
+        }
+        ramp.Push((rr << 16) | (gg << 8) | bb)
+    }
+    return ramp
+}
+
+global _themeName := ThemeLoadName()
+global _accentRamp := ThemeAccentRamp(11)
+global _themeHexStr := Format("{:06X}", ThemeAccentRgb())
+
+global _RED_BGR  := ThemeRgbToBgr(ThemeAccentRgb())
+
+ThemeDimRgb() {
+    rgb := ThemeAccentRgb()
+    r := (rgb >> 16) & 0xFF, g := (rgb >> 8) & 0xFF, b := rgb & 0xFF
+    return ((r // 3) << 16) | ((g // 3) << 8) | (b // 3)
+}
+
+global _RED_DIM_BGR := ThemeRgbToBgr(ThemeDimRgb())
+global _GRAY_BGR := 0xDDDDDD
+global _DK_BG    := 0x1A1A1A
 
 ModeSelectTab := MainGui.Add("Tab2","x-3 y0 w460 h440 Background000000",["JoinSim","Magic F","AutoLvL","Popcorn","Sheep","Craft","Macro","Misc"])
 ModeSelectTab.SetFont("s9 cFFFFFF Bold", "Segoe UI")
@@ -911,7 +1004,7 @@ DllCall("uxtheme\SetWindowTheme", "Ptr", _dtTabHwnd, "Str", "", "Str", "")
 OnMessage(0x002B, _GGDrawItem)
 
 _GGDrawItem(wParam, lParam, msg, hwnd) {
-    global _dtTabHwnd, _darkBtns
+    global _dtTabHwnd, _darkBtns, _RED_BGR, _RED_DIM_BGR
     ctlType := NumGet(lParam, 0, "UInt")
     pSz := A_PtrSize
     hwndOff := (pSz = 8) ? 24 : 20
@@ -969,9 +1062,9 @@ _GGDrawItem(wParam, lParam, msg, hwnd) {
         rcR := NumGet(lParam, rcOff + 8, "Int"), rcB := NumGet(lParam, rcOff + 12, "Int")
         isSelected := (itemState & 0x0001)
         if (isSelected) {
-            bgBGR := 0x222222, fgBGR := 0x4444FF, bdBGR := 0x4444FF
+            bgBGR := 0x222222, fgBGR := _RED_BGR, bdBGR := _RED_BGR
         } else {
-            bgBGR := 0x000000, fgBGR := 0x20207A, bdBGR := 0x20207A
+            bgBGR := 0x000000, fgBGR := _RED_DIM_BGR, bdBGR := _RED_DIM_BGR
         }
         hBr := DllCall("CreateSolidBrush", "UInt", bgBGR, "Ptr")
         rc := Buffer(16, 0)
@@ -1025,8 +1118,64 @@ ApplicationSelect.SetFont("s8 c888888","Segoe UI")
 
 ModeSelectTab.UseTab(1)
 
+global themeSwatch := DarkBtn(MainGui, "x388 y28 w22 h20", "T", _RED_BGR, _DK_BG, -10, true)
+themeSwatch.OnEvent("Click", ThemeSwatchClick)
+
+global themeMenuGui := 0
+
+ThemeSwatchClick(*) {
+    global themeMenuGui, themeSwatch, _themes, _themeName
+    if (themeMenuGui) {
+        ThemeMenuClose()
+        return
+    }
+    rect := Buffer(16, 0)
+    DllCall("GetWindowRect", "Ptr", themeSwatch.Hwnd, "Ptr", rect)
+    sx := NumGet(rect, 0, "Int")
+    sy := NumGet(rect, 12, "Int")
+
+    themeMenuGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Owner" MainGui.Hwnd)
+    themeMenuGui.BackColor := "1A1A1A"
+    themeMenuGui.MarginX := 3, themeMenuGui.MarginY := 3
+
+    names := ["Ares","Helios","Hermes","Neptune","Slate","Shade","Mono"]
+    rowY := 3
+    for _tn in names {
+        accent := _themes[_tn]["hex"]
+        hexStr := Format("{:06X}", accent)
+        sw := themeMenuGui.Add("Text", "x3 y" rowY " w14 h14 Background" hexStr, "")
+        isActive := (_tn = _themeName)
+        lblColor := isActive ? hexStr : "DDDDDD"
+        lbl := themeMenuGui.Add("Text", "x22 y" (rowY+1) " w90 h14 Background1A1A1A c" lblColor, _tn)
+        if (isActive)
+            lbl.SetFont("s9 Bold", "Segoe UI")
+        else
+            lbl.SetFont("s9", "Segoe UI")
+        name := _tn
+        lbl.OnEvent("Click", ThemePickLbl.Bind(name))
+        sw.OnEvent("Click", ThemePickLbl.Bind(name))
+        rowY += 18
+    }
+
+    themeMenuGui.OnEvent("Escape", (*) => ThemeMenuClose())
+    themeMenuGui.Show("x" sx " y" sy " w118 NoActivate")
+}
+
+ThemeMenuClose() {
+    global themeMenuGui
+    if (themeMenuGui) {
+        try themeMenuGui.Destroy()
+        themeMenuGui := 0
+    }
+}
+
+ThemePickLbl(name, *) {
+    ThemeSaveName(name)
+    Reload
+}
+
 InfoText := MainGui.AddText("x40 y28 w280 h44 center","`nRUN AT STANDARD GAMMA`nSTART ON MAIN MENU OR SERVER LIST")
-InfoText.SetFont("s8 bold cFF4444","Segoe UI")
+InfoText.SetFont("s8 bold c" _themeHexStr,"Segoe UI")
 
 MainGui.Add("Text","x25 y76 w65 h23 +0x200","Server:").SetFont("s9 cDDDDDD","Segoe UI")
 global ServerNumberEdit := MainGui.Add("ComboBox","x90 y76 w180 h21 r8 +Limit4", [])
@@ -1097,25 +1246,25 @@ Loop _dSteps {
     _dSegs := [[_dP1x,_dP1y,_dP2x,_dP2y],[_dP2x,_dP2y,_dP3x,_dP3y],[_dP3x,_dP3y,_dP1x,_dP1y]]
     for , _s in _dSegs {
         if (_f < 0.10)
-            _c := 0x550808
+            _c := _accentRamp[2]
         else if (_f < 0.20)
-            _c := 0x771010
+            _c := _accentRamp[3]
         else if (_f < 0.25)
-            _c := 0x991818
+            _c := _accentRamp[4]
         else if (_f < 0.35)
-            _c := 0xBB2222
+            _c := _accentRamp[5]
         else if (_f < 0.45)
-            _c := 0xDD3030
+            _c := _accentRamp[6]
         else if (_f < 0.55)
-            _c := 0xFF4040
+            _c := _accentRamp[7]
         else if (_f < 0.65)
-            _c := 0xFF5555
+            _c := _accentRamp[8]
         else if (_f < 0.75)
-            _c := 0xFF7777
+            _c := _accentRamp[9]
         else if (_f < 0.85)
-            _c := 0xFFAAAA
+            _c := _accentRamp[10]
         else
-            _c := 0xFFBBBB
+            _c := _accentRamp[11]
         _sc := (_a << 24) | _c
         DllCall("gdiplus\GdipCreatePen1", "UInt", _sc, "Float", _pw, "Int", 2, "Ptr*", &_dPen := 0)
         DllCall("gdiplus\GdipSetPenLineJoin", "Ptr", _dPen, "Int", 0)
@@ -1221,26 +1370,36 @@ DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &_ggFmt :=
 DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", _ggFmt, "Int", 0)
 _ggFS := 5.5
 
+_ggS1 := 0xFF000000 | _accentRamp[10]
+_ggS2 := 0xFF000000 | _accentRamp[9]
+_ggS3 := 0xFF000000 | _accentRamp[8]
+_ggS4 := 0xFF000000 | _accentRamp[7]
+_ggS5 := 0xFF000000 | _accentRamp[6]
+_ggS6 := 0xFF000000 | _accentRamp[5]
+_ggS7 := 0xFF000000 | _accentRamp[4]
+_ggS8 := 0xFF000000 | _accentRamp[3]
+_ggS9 := 0xFF000000 | _accentRamp[2]
+
 _ggLines := [
-    ["_____/\\\\\\\\\\\\_____/\\\\\\\\\\\\_",                        248, 330, 0xFFFFAAAA],
-    [" ___/\\\//////////____/\\\//////////__",                         248, 338, 0xFFFF7777],
-    ["  __/\\\______________/\\\_____________",                        248, 346, 0xFFFF5555],
-    ["   _\/\\\____/\\\\\\\_\/\\\____/\\\\\\\_",                      248, 354, 0xFFFF4040],
-    ["    _\/\\\___\/////\\\_\/\\\___\/////\\\_",                     248, 362, 0xFFDD3030],
-    ["     _\/\\\_______\/\\\_\/\\\_______\/\\\_",                    248, 370, 0xFFBB2222],
-    ["      _\/\\\_______\/\\\_\/\\\_______\/\\\_",                   248, 378, 0xFF991818],
-    ["       _\//\\\\\\\\\\\\/__\//\\\\\\\\\\\\/__",                 248, 386, 0xFF771010],
-    ["        __\////////////_____\////////////____",                 248, 394, 0xFF550808]
+    ["_____/\\\\\\\\\\\\_____/\\\\\\\\\\\\_",                        248, 330, _ggS1],
+    [" ___/\\\//////////____/\\\//////////__",                         248, 338, _ggS2],
+    ["  __/\\\______________/\\\_____________",                        248, 346, _ggS3],
+    ["   _\/\\\____/\\\\\\\_\/\\\____/\\\\\\\_",                      248, 354, _ggS4],
+    ["    _\/\\\___\/////\\\_\/\\\___\/////\\\_",                     248, 362, _ggS5],
+    ["     _\/\\\_______\/\\\_\/\\\_______\/\\\_",                    248, 370, _ggS6],
+    ["      _\/\\\_______\/\\\_\/\\\_______\/\\\_",                   248, 378, _ggS7],
+    ["       _\//\\\\\\\\\\\\/__\//\\\\\\\\\\\\/__",                 248, 386, _ggS8],
+    ["        __\////////////_____\////////////____",                 248, 394, _ggS9]
 ]
 _ggPipes := [
-    [245, 338, 0xFFFF7777],
-    [245, 346, 0xFFFF5555], [249, 346, 0xFFFF5555],
-    [245, 354, 0xFFFF4040], [249, 354, 0xFFFF4040], [253, 354, 0xFFFF4040],
-    [245, 362, 0xFFDD3030], [249, 362, 0xFFDD3030], [253, 362, 0xFFDD3030], [257, 362, 0xFFDD3030],
-    [245, 370, 0xFFBB2222], [249, 370, 0xFFBB2222], [253, 370, 0xFFBB2222], [257, 370, 0xFFBB2222], [261, 370, 0xFFBB2222],
-    [245, 378, 0xFF991818], [249, 378, 0xFF991818], [253, 378, 0xFF991818], [257, 378, 0xFF991818], [261, 378, 0xFF991818], [265, 378, 0xFF991818],
-    [245, 386, 0xFF771010], [249, 386, 0xFF771010], [253, 386, 0xFF771010], [257, 386, 0xFF771010], [261, 386, 0xFF771010], [265, 386, 0xFF771010], [269, 386, 0xFF771010],
-    [245, 394, 0xFF550808], [249, 394, 0xFF550808], [253, 394, 0xFF550808], [257, 394, 0xFF550808], [261, 394, 0xFF550808], [265, 394, 0xFF550808], [269, 394, 0xFF550808], [273, 394, 0xFF550808]
+    [245, 338, _ggS2],
+    [245, 346, _ggS3], [249, 346, _ggS3],
+    [245, 354, _ggS4], [249, 354, _ggS4], [253, 354, _ggS4],
+    [245, 362, _ggS5], [249, 362, _ggS5], [253, 362, _ggS5], [257, 362, _ggS5],
+    [245, 370, _ggS6], [249, 370, _ggS6], [253, 370, _ggS6], [257, 370, _ggS6], [261, 370, _ggS6],
+    [245, 378, _ggS7], [249, 378, _ggS7], [253, 378, _ggS7], [257, 378, _ggS7], [261, 378, _ggS7], [265, 378, _ggS7],
+    [245, 386, _ggS8], [249, 386, _ggS8], [253, 386, _ggS8], [257, 386, _ggS8], [261, 386, _ggS8], [265, 386, _ggS8], [269, 386, _ggS8],
+    [245, 394, _ggS9], [249, 394, _ggS9], [253, 394, _ggS9], [257, 394, _ggS9], [261, 394, _ggS9], [265, 394, _ggS9], [269, 394, _ggS9], [273, 394, _ggS9]
 ]
 for , _ln in _ggLines {
     DllCall("gdiplus\GdipCreateFont", "Ptr", _ggFamily, "Float", _ggFS, "Int", 1, "Int", 3, "Ptr*", &_ggFont := 0)
@@ -1316,10 +1475,10 @@ PcLog("=== Script started ===")
 
 ModeSelectTab.UseTab(2)
 
-MainGui.SetFont("s10 bold cFF4444","Segoe UI")
+MainGui.SetFont("s10 bold c" _themeHexStr,"Segoe UI")
 magicGiveText := MainGui.Add("Text","x190 y25 w110 h20 +0x200","Give:")
 
-MainGui.SetFont("s8 Bold cFF4444","Segoe UI")
+MainGui.SetFont("s8 Bold c" _themeHexStr,"Segoe UI")
 mfHelpBtn := DarkBtn(MainGui, "x385 y32 w28 h20", "?", _RED_BGR, _DK_BG, -11, true)
 mfHelpBtn.OnEvent("Click", MagicFShowHelp)
 
@@ -1356,7 +1515,7 @@ mfGAddBtn.OnEvent("Click", MfGiveAdd)
 mfGDelBtn := DarkBtn(MainGui, "x352 y156 w13 h21", "-", _RED_BGR, _DK_BG, -9, true)
 mfGDelBtn.OnEvent("Click", MfGiveRemove)
 
-MainGui.SetFont("s10 bold cFF4444","Segoe UI")
+MainGui.SetFont("s10 bold c" _themeHexStr,"Segoe UI")
 magicTakeText := MainGui.Add("Text","x190 y180 w110 h20 +0x200","Take:")
 
 MainGui.SetFont("s9 cDDDDDD","Segoe UI")
@@ -1396,7 +1555,7 @@ MainGui.SetFont("s8 Bold cDDDDDD","Segoe UI")
 mfRefillBtn := DarkBtn(MainGui, "x75 y338 w90 h28", "Take/Refill", _RED_BGR, _DK_BG, -11, true)
 mfRefillBtn.OnEvent("Click", MagicFToggleRefill)
 
-MainGui.SetFont("s9 Bold cFF4444","Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr,"Segoe UI")
 ButtonSTARTSTOP    := DarkBtn(MainGui, "x265 y338 w100 h28", "START", _RED_BGR, _DK_BG, -12, true)
 ButtonSTARTSTOP.OnEvent("Click", RunMagicF)
 
@@ -1430,7 +1589,7 @@ MagicFShowHelp(*) {
     }
     mfHelpGui := Gui("+AlwaysOnTop +Owner", "Magic F Help")
     mfHelpGui.BackColor := "1A1A1A"
-    mfHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    mfHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     mfHelpGui.Add("Text", "x45 y15 w255", "Quick Guide")
     mfHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     mfHelpGui.Add("Text", "x45 y38 w255",
@@ -1501,7 +1660,7 @@ for cb in [BeerCheckboxTake, BerryCheckboxTake, CharcCheckboxTake, CookedCheckbo
 ModeSelectTab.UseTab(3)
 
 AutoLvLText := MainGui.AddText("x85 y25 w270 h45 center border","`nChoose the points below then click START`n")
-AutoLvLText.SetFont("s8 bold cFF4444","Segoe UI")
+AutoLvLText.SetFont("s8 bold c" _themeHexStr,"Segoe UI")
 
 MainGui.SetFont("s9 bold cDDDDDD","Segoe UI")
 MainGui.Add("Text","vHealthPointText x70 y90 w100 h25 +0x200","Health Points:")
@@ -1538,7 +1697,7 @@ AutoSaddleCheckBox := MainGui.AddCheckbox("x45 y270","Auto Saddle")
 NoOxyCheckBox      := MainGui.AddCheckbox("x45 y293","No Oxy")
 global autoLvlCombineChk := MainGui.AddCheckbox("x250 y300 w100 h20","Combine")
 autoLvlCombineChk.SetFont("s9 cDDDDDD","Segoe UI")
-MainGui.SetFont("s9 Bold cFF4444","Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr,"Segoe UI")
 StartAutoLvlButton := DarkBtn(MainGui, "x160 y280 w80 h28", "START", _RED_BGR, _DK_BG, -12, true)
 StartAutoLvlButton.OnEvent("Click", RunAutoLvl)
 MainGui.SetFont("s9 cDDDDDD","Segoe UI")
@@ -1594,11 +1753,11 @@ pcForgeSkipInd.OnEvent("Click", (*) => PcToggle("ForgeSkip"))
 
 MainGui.SetFont("s8 c888888", "Segoe UI")
 MainGui.Add("Text", "x32 y146 w44 h16", "Speed:")
-pcSpeedTxt := MainGui.Add("Text", "x78 y146 w88 h16 cFF4444", "Fast [Z]")
+pcSpeedTxt := MainGui.Add("Text", "x78 y146 w88 h16 c" _themeHexStr, "Fast [Z]")
 
 MainGui.SetFont("s8 c888888", "Segoe UI")
 MainGui.Add("Text", "x32 y166 w72 h16", "Drop Key:")
-pcDropKeyTxt := MainGui.Add("Text", "x98 y166 w60 h16 cFF4444", pcDropKey)
+pcDropKeyTxt := MainGui.Add("Text", "x98 y166 w60 h16 c" _themeHexStr, pcDropKey)
 
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 
@@ -1606,7 +1765,7 @@ MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 pcScanAreaBtn := DarkBtn(MainGui, "x280 y188 w80 h28", "Scan Area", _RED_BGR, _DK_BG, -11, true)
 pcScanAreaBtn.OnEvent("Click", PcToggleScanResize)
 
-MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
 pcExecBtn := DarkBtn(MainGui, "x168 y188 w100 h28", "Start", _RED_BGR, _DK_BG, -12, true)
 pcExecBtn.OnEvent("Click", (*) => PcExecuteBtn())
 
@@ -1623,7 +1782,7 @@ pcStatusTxt := MainGui.Add("Text", "x32 y249 w354 h14 Center cDDDDDD", "Select a
 ModeSelectTab.UseTab(5)
 
 SheepInfoText := MainGui.AddText("x80 y25 w270 h50 center border","`nSet keybinds — defaults are ready to use`nRes: " sx "x" sy)
-SheepInfoText.SetFont("s8 bold cFF4444","Segoe UI")
+SheepInfoText.SetFont("s8 bold c" _themeHexStr,"Segoe UI")
 
 sheepLabelX  := 22
 sheepEditX   := 175
@@ -1661,7 +1820,7 @@ MainGui.Add("Text","x" sheepLabelX " y" (sheepRowY+30) " w340","Click 'Set' then
 global sheepSaveBtn := DarkBtn(MainGui, "x100 y" (sheepRowY+50) " w220 h28", "Save Settings", _RED_BGR, _DK_BG, -12, true)
 sheepSaveBtn.OnEvent("Click", SheepApplyKeys)
 
-MainGui.Add("Text","x" sheepLabelX " y" (sheepRowY+86) " w340 Center","Stack sheep to harvest more than one at a time").SetFont("s8 cFF4444","Segoe UI")
+MainGui.Add("Text","x" sheepLabelX " y" (sheepRowY+86) " w340 Center","Stack sheep to harvest more than one at a time").SetFont("s8 c" _themeHexStr,"Segoe UI")
 MainGui.Add("Text","x" sheepLabelX " y" (sheepRowY+102) " w340 Center","Look at sheep, press Start/Pause key to begin...").SetFont("s8 c888888 Italic","Segoe UI")
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1675,7 +1834,7 @@ ModeSelectTab.UseTab(6)
 acGridHelpBtn := DarkBtn(MainGui, "x357 y30 w32 h18", "?", _RED_BGR, _DK_BG, -11, true)
 acGridHelpBtn.OnEvent("Click", AcShowGridHelp)
 
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x280 y39 w10 h56 +0x200", "|")
 
 global acTallyBtn := DarkBtn(MainGui, "x293 y30 w52 h18", "Count", _RED_BGR, _DK_BG, -11, true)
@@ -1683,7 +1842,7 @@ acTallyBtn.OnEvent("Click", AcTallyToggle)
 MainGui.SetFont("s7 c666666 Italic", "Segoe UI")
 MainGui.Add("Text", "x283 y48 w100 h12 Center", "count items crafted")
 
-MainGui.SetFont("s9 bold cFF4444","Segoe UI")
+MainGui.SetFont("s9 bold c" _themeHexStr,"Segoe UI")
 MainGui.Add("Text","x37 y30 w120 h18","Simple Craft")
 
 MainGui.SetFont("s9 cDDDDDD","Segoe UI")
@@ -1731,7 +1890,7 @@ acSimpleLoopBtn.SetFont("s8 cDDDDDD","Segoe UI")
 
 MainGui.Add("Text","x23 y128 w366 h1 +0x10")
 
-MainGui.SetFont("s9 bold cFF4444","Segoe UI")
+MainGui.SetFont("s9 bold c" _themeHexStr,"Segoe UI")
 MainGui.Add("Text","x37 y133 w260 h18","Inventory Timed")
 
 MainGui.SetFont("s9 cDDDDDD","Segoe UI")
@@ -1764,7 +1923,7 @@ acTimedLoopBtn.SetFont("s8 cDDDDDD","Segoe UI")
 
 MainGui.Add("Text","x23 y232 w366 h1 +0x10")
 
-MainGui.SetFont("s9 bold cFF4444","Segoe UI")
+MainGui.SetFont("s9 bold c" _themeHexStr,"Segoe UI")
 MainGui.Add("Text","x37 y237 w80 h18","Grid Walk")
 
 MainGui.SetFont("s8 cDDDDDD","Segoe UI")
@@ -1840,7 +1999,7 @@ acGFDelBtn.OnEvent("Click", (*) => AcFilterRemove("grid"))
 acGridStartBtn := DarkBtn(MainGui, "x201 y343 w100 h28", "START", _RED_BGR, _DK_BG, -12, true)
 acGridStartBtn.OnEvent("Click", AcStartGrid)
 
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x306 y343 w10 h28 +0x200", "|")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global acTakeAllBtn := MainGui.Add("CheckBox", "x318 y348 w100 h18", "Take-All")
@@ -1866,22 +2025,19 @@ qhAllBtn.OnEvent("Click", (*) => QhToggleMode(qhAllBtn, 1))
 qhSingleBtn := MainGui.Add("CheckBox", "x160 y32 w140 h23", "Quick Hatch (Single)")
 qhSingleBtn.OnEvent("Click", (*) => QhToggleMode(qhSingleBtn, 2))
 
-MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
 qhStartBtn  := DarkBtn(MainGui, "x308 y131 w70 h28", "START", _RED_BGR, _DK_BG, -12, true)
 qhStartBtn.OnEvent("Click", QhStart)
 
 MainGui.SetFont("s8 c888888 Italic", "Segoe UI")
 global qhStatusTxt := MainGui.Add("Text", "x22 y62 w200 h14", "Select a mode then press START")
 
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x22 y84 w80", "Claim/Name")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global cnEnableBtn := MainGui.Add("CheckBox", "x105 y84 w15 h20")
 cnEnableBtn.OnEvent("Click", CnEnableToggle)
-global depoEmbryoBtn := MainGui.Add("CheckBox", "x135 y84 w110 h20", "Depo Embryo")
-depoEmbryoBtn.SetFont("s8 cDDDDDD", "Segoe UI")
-
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x22 y108 w80", "Name/Spay")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global nsEnableBtn := MainGui.Add("CheckBox", "x105 y108 w15 h20")
@@ -1908,7 +2064,7 @@ nsHelpBtn.OnEvent("Click", NsShowHelp)
 MainGui.Add("Text", "x8 y164 w366 h1 +0x10")
 
 ; --- INI ---
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x22 y170 w200", "Apply INI  —  F5")
 MainGui.SetFont("s8 c888888", "Segoe UI")
 MainGui.Add("Text", "x22 y186 w200", "Pastes INI into command bar")
@@ -1933,7 +2089,7 @@ global miscSetKeysBtn := DarkBtn(MainGui, "x22 y310 w70 h20", "Set Keys", _RED_B
 miscSetKeysBtn.OnEvent("Click", (*) => PcShowSetKeysForm())
 
 ; --- AUTO PIN / AUTO TELEPORT / NVIDIA FILTER ---
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x122 y286 w10 h60 +0x200", "|")
 MainGui.SetFont("s9 cDDDDDD", "Segoe UI")
 global pinEnableBtn := MainGui.Add("CheckBox", "x136 y286 w80 h20", "Auto Pin")
@@ -1999,8 +2155,8 @@ CryoToggle(*) {
 }
 
 ; --- AUTO IMPRINT ---
-MainGui.Add("Text", "x230 y196 w1 h40 BackgroundFF4444")
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.Add("Text", "x230 y196 w1 h40 Background" _themeHexStr)
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x242 y170 w190", "Auto Imprint")
 
 global imprintStartBtn := DarkBtn(MainGui, "x242 y192 w100 h26", "Start", _RED_BGR, _DK_BG, -12, true)
@@ -2028,7 +2184,7 @@ global imprintStatusTxt := MainGui.Add("Text", "x242 y270 w190 h16", "Press Star
 
 ; --- UPLOAD FILTER LIST ---
 MainGui.Add("Text", "x236 y298 w180 h1 +0x10")
-MainGui.SetFont("s8 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s8 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x242 y304 w100 h14", "Upload Filter")
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 global nsUploadFilterCB := MainGui.Add("CheckBox", "x342 y302 w15 h18")
@@ -2042,7 +2198,7 @@ ufDelBtn.OnEvent("Click", UfRemoveFilter)
 
 ; --- RECONNECT ---
 MainGui.Add("Text", "x8 y350 w410 h1 +0x10")
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x14 y356 w80", "Reconnect")
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
 MainGui.Add("Text", "x14 y376 w30 h20 +0x200", "Key:")
@@ -2054,21 +2210,24 @@ reconSaveKeyBtn := DarkBtn(MainGui, "x144 y376 w40 h20", "Save", _RED_BGR, _DK_B
 reconSaveKeyBtn.OnEvent("Click", ReconnectSaveKey)
 
 ; Vertical separator
-MainGui.Add("Text", "x195 y362 w1 h25 BackgroundFF4444")
+MainGui.Add("Text", "x195 y362 w1 h25 Background" _themeHexStr)
 
 ; --- LOG WATCH ---
-MainGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+MainGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
 MainGui.Add("Text", "x210 y356 w80", "Log Watch")
 MainGui.SetFont("s8 cDDDDDD", "Segoe UI")
-global logWatchBtn := DarkBtn(MainGui, "x210 y376 w100 h24", "Configure", _RED_BGR, _DK_BG, -11, false)
-logWatchBtn.OnEvent("Click", LogWatchToggle)
+global logWatchBtn := DarkBtn(MainGui, "x210 y376 w70 h24", "Configure", _RED_BGR, _DK_BG, -11, false)
+logWatchBtn.OnEvent("Click", LogWatchShowWizard)
+global logWatchStartBtn := DarkBtn(MainGui, "x285 y376 w60 h24", "Start", _RED_BGR, _DK_BG, -11, false)
+logWatchStartBtn.OnEvent("Click", LwStartStop)
+
 
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ModeSelectTab.UseTab(7)
 
-MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
 macroGuidedBtn := DarkBtn(MainGui, "x12 y28 w105 h26", "+ Guided", _RED_BGR, _DK_BG, -12, true)
 macroGuidedBtn.OnEvent("Click", GuidedStartWizard)
 
@@ -2092,7 +2251,7 @@ macroLV.ModifyCol(3, 40)
 macroLV.ModifyCol(4, 155)
 macroLV.OnEvent("Click", MacroLVClick)
 
-MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
 macroPlaySelBtn := DarkBtn(MainGui, "x12 y246 w65 h26", "Start", _RED_BGR, _DK_BG, -11, true)
 macroPlaySelBtn.OnEvent("Click", MacroPlaySelected)
 
@@ -2106,7 +2265,7 @@ macroEditSelBtn.OnEvent("Click", MacroEditSelected)
 macroDeleteSelBtn := DarkBtn(MainGui, "x199 y246 w60 h26", "Delete", _RED_BGR, _DK_BG, -11, true)
 macroDeleteSelBtn.OnEvent("Click", MacroDeleteSelected)
 
-MainGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+MainGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
 macroUpBtn := DarkBtn(MainGui, "x380 y246 w26 h26", Chr(0x25B2), _RED_BGR, _DK_BG, -11, false)
 macroUpBtn.OnEvent("Click", MacroMoveUp)
 macroDownBtn := DarkBtn(MainGui, "x410 y246 w26 h26", Chr(0x25BC), _RED_BGR, _DK_BG, -11, false)
@@ -2545,7 +2704,6 @@ LogWatchToggle(*) {
     global logWatchRunning, logWatchBtn
     if (logWatchRunning) {
         LwStopWatch()
-        DarkBtnText(logWatchBtn, "Configure")
     } else {
         LogWatchShowWizard()
     }
@@ -2561,91 +2719,115 @@ LogWatchShowWizard(*) {
 
     logWatchWizard := Gui("+AlwaysOnTop", "Log Watch Setup")
     logWatchWizard.BackColor := "000000"
-    logWatchWizard.SetFont("s10 Bold cFF4444", "Segoe UI")
+
+    ; Grid: left margin x16, label col w80, input col starts x100, wizard inner width 318.
+    ; Row rhythm: 30px between related rows, dividers get 12px breathing above + 12px below.
+
+    ; --- Title row ---
+    logWatchWizard.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     logWatchWizard.Add("Text", "x16 y16 w280", "Log Watch")
     lwHelpBtn := DarkBtn(logWatchWizard, "x320 y14 w24 h24", "?", _RED_BGR, _DK_BG, -12, true)
     lwHelpBtn.OnEvent("Click", LwShowHelp)
-    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
 
-    logWatchWizard.Add("Text", "x16 y48 w80 h20 +0x200", "Preset:")
-    global lwPresetDDL := logWatchWizard.Add("DropDownList", "x100 y48 w200", ["Structures Destroyed", "Custom"])
+    ; --- Detection section ---
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y50 w80 h20 +0x200", "Preset:")
+    global lwPresetDDL := logWatchWizard.Add("DropDownList", "x100 y50 w200", ["Structures Destroyed", "Custom"])
     lwPresetDDL.SetFont("s9 c000000", "Segoe UI")
     lwPresetDDL.Value := 1
     lwPresetDDL.OnEvent("Change", LwPresetChanged)
 
-    logWatchWizard.Add("Text", "x16 y78 w80 h20 +0x200", "Words:")
-    global lwWordsLbl := logWatchWizard.Add("Text", "x16 y78 w80 h20 +0x200", "Words:")
-    global lwWordsEdit := logWatchWizard.Add("Edit", "x100 y76 w200 h22", "Your,was,destroyed")
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwWordsLbl := logWatchWizard.Add("Text", "x16 y82 w80 h20 +0x200", "Words:")
+    global lwWordsEdit := logWatchWizard.Add("Edit", "x100 y80 w200 h22", "Your,was,destroyed")
     lwWordsEdit.SetFont("s9 c000000", "Segoe UI")
 
-    global lwThresholdY := 108
-    logWatchWizard.Add("Text", "x16 y108 w80 h20 +0x200", "Threshold:")
-    global lwThreshLbl := logWatchWizard.Add("Text", "x16 y108 w80 h20 +0x200", "Threshold:")
-    global lwThreshEdit := logWatchWizard.Add("Edit", "x100 y106 w60 h22", "3")
+    global lwThresholdY := 114
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwThreshLbl := logWatchWizard.Add("Text", "x16 y114 w80 h20 +0x200", "Threshold:")
+    global lwThreshEdit := logWatchWizard.Add("Edit", "x100 y112 w60 h22", "3")
     lwThreshEdit.SetFont("s9 c000000", "Segoe UI")
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x165 y110 w130", "occurrences in a row = trigger")
+    logWatchWizard.Add("Text", "x166 y116 w160", "in a row = trigger")
 
-    logWatchWizard.Add("Progress", "x16 y138 w318 h1 Background333333")
+    logWatchWizard.Add("Progress", "x16 y146 w318 h1 Background333333")
 
-    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y148 w300", "Scan Area: use Resize to adjust")
-    global lwScanBtn := DarkBtn(logWatchWizard, "x16 y170 w100 h24", "Resize", _RED_BGR, _DK_BG, -11, false)
+    ; --- Scan area section ---
+    global lwScanBtn := DarkBtn(logWatchWizard, "x16 y158 w70 h24", "Resize", _RED_BGR, _DK_BG, -11, false)
     lwScanBtn.OnEvent("Click", LwToggleResize)
-    global lwHideOverlayCB := logWatchWizard.Add("CheckBox", "x120 y172 w130 h16", "Hide scan outline")
+    global lwScanDefaultBtn := DarkBtn(logWatchWizard, "x92 y158 w70 h24", "Default", _RED_BGR, _DK_BG, -11, false)
+    lwScanDefaultBtn.OnEvent("Click", LwResetScanAreaDefault)
+    global lwHideOverlayCB := logWatchWizard.Add("CheckBox", "x172 y162 w150 h16", "Hide scan outline")
     lwHideOverlayCB.SetFont("s8 c888888", "Segoe UI")
     lwHideOverlayCB.Value := logWatchHideOverlay ? 1 : 0
     lwHideOverlayCB.OnEvent("Click", LwHideOverlayToggle)
 
-    global lwScanInfoTxt := logWatchWizard.Add("Text", "x16 y200 w310", logWatchScanX > 0 ? logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH : "Not set")
-    lwScanInfoTxt.SetFont("s8 c888888", "Segoe UI")
-
-    global lwStatusTxt := logWatchWizard.Add("Text", "x16 y200 w300", logWatchScanX > 0 ? "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH : "Scan area: not set")
+    global lwStatusTxt := logWatchWizard.Add("Text", "x16 y190 w318 h16", logWatchScanX > 0 ? "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH : "Scan area: not set")
     lwStatusTxt.SetFont("s8 c888888", "Segoe UI")
 
-    logWatchWizard.Add("Progress", "x16 y218 w318 h1 Background333333")
+    logWatchWizard.Add("Progress", "x16 y214 w318 h1 Background333333")
 
+    ; --- Trigger options section ---
     logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y228 w80 h20 +0x200", "Stagger:")
-    global lwStaggerCB := logWatchWizard.Add("CheckBox", "x80 y228 w14 h20")
+    global lwStaggerCB := logWatchWizard.Add("CheckBox", "x16 y228 w14 h20")
     lwStaggerCB.SetFont("s9 c000000", "Segoe UI")
     lwStaggerCB.Value := logWatchStagger ? 1 : 0
     lwStaggerCB.OnEvent("Click", LwStaggerChanged)
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    logWatchWizard.Add("Text", "x34 y228 w74 h20 +0x200", "Anti-spam")
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x98 y230 w40 h20", "Mult:")
-    global lwStaggerMultEdit := logWatchWizard.Add("Edit", "x140 y228 w40 h20", logWatchStaggerMult)
+    logWatchWizard.Add("Text", "x110 y230 w30 h20", "Mult:")
+    global lwStaggerMultEdit := logWatchWizard.Add("Edit", "x142 y228 w40 h20", logWatchStaggerMult)
     lwStaggerMultEdit.SetFont("s9 c000000", "Segoe UI")
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x185 y230 w120", "x after 1st trigger")
+    logWatchWizard.Add("Text", "x188 y230 w140", "x after 1st trigger")
 
     logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y252 w130 h20 +0x200", "Lock Reset (min):")
-    global lwLockResetCB := logWatchWizard.Add("CheckBox", "x150 y252 w14 h20")
+    global lwLockResetCB := logWatchWizard.Add("CheckBox", "x16 y258 w14 h20")
     lwLockResetCB.SetFont("s9 c000000", "Segoe UI")
     lwLockResetCB.Value := logWatchLockReset ? 1 : 0
     lwLockResetCB.OnEvent("Click", LwLockResetChanged)
-    global lwLockResetEdit := logWatchWizard.Add("Edit", "x168 y250 w50 h22", logWatchLockResetMin)
+    logWatchWizard.Add("Text", "x34 y258 w130 h20 +0x200", "Lock Reset (sec)")
+    global lwLockResetEdit := logWatchWizard.Add("Edit", "x166 y256 w50 h22", logWatchLockResetMin)
     lwLockResetEdit.SetFont("s9 c000000", "Segoe UI")
 
+    logWatchWizard.Add("Progress", "x16 y292 w318 h1 Background333333")
+
+    ; --- Discord section ---
     logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y278 w70 h20 +0x200", "Discord:")
-    global lwWebhookEdit := logWatchWizard.Add("Edit", "x90 y276 w178 h22", logWatchWebhook)
+    logWatchWizard.Add("Text", "x16 y306 w80 h20 +0x200", "Webhook:")
+    global lwWebhookEdit := logWatchWizard.Add("Edit", "x100 y304 w168 h22", logWatchWebhook)
     lwWebhookEdit.SetFont("s9 c000000", "Segoe UI")
-    global lwTestBtn := DarkBtn(logWatchWizard, "x272 y276 w50 h22", "Test", _RED_BGR, _DK_BG, -11, false)
+    global lwTestBtn := DarkBtn(logWatchWizard, "x272 y304 w62 h22", "Test", _RED_BGR, _DK_BG, -11, false)
     lwTestBtn.OnEvent("Click", LwTestDiscord)
 
-    logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x16 y302 w20 h20", "@")
-    logWatchWizard.SetFont("s9 cFF4444 Bold", "Segoe UI")
-    global lwPingEdit := logWatchWizard.Add("Edit", "x40 y300 w250 h22", logWatchPing)
+    logWatchWizard.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
+    logWatchWizard.Add("Text", "x16 y338 w20 h20 +0x200", "@")
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwPingEdit := logWatchWizard.Add("Edit", "x40 y336 w170 h22", logWatchPing)
     lwPingEdit.SetFont("s9 c000000", "Segoe UI")
+    global lwPingRoleCb := logWatchWizard.Add("Checkbox", "x220 y338 w60 h20", "Role")
+    lwPingRoleCb.Value := logWatchPingRole ? 1 : 0
     logWatchWizard.SetFont("s8 c888888", "Segoe UI")
-    logWatchWizard.Add("Text", "x40 y326 w250", "Discord user ID — results in <@ID> ping")
+    logWatchWizard.Add("Text", "x40 y362 w280", "Paste user ID. Tick Role if pinging a role instead.")
 
-    global lwStartBtn := DarkBtn(logWatchWizard, "x135 y350 w80 h28", "Start", _RED_BGR, _DK_BG, -12, false)
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwAttachScreenshotCB := logWatchWizard.Add("CheckBox", "x16 y388 w14 h20")
+    lwAttachScreenshotCB.SetFont("s9 c000000", "Segoe UI")
+    lwAttachScreenshotCB.Value := logWatchAttachScreenshot ? 1 : 0
+    logWatchWizard.Add("Text", "x34 y388 w260 h20 +0x200", "Attach screenshot to Discord")
+
+    logWatchWizard.SetFont("s9 cDDDDDD", "Segoe UI")
+    global lwRejoinCB := logWatchWizard.Add("CheckBox", "x16 y416 w14 h20")
+    lwRejoinCB.SetFont("s9 c000000", "Segoe UI")
+    lwRejoinCB.Value := logWatchRejoinEnabled ? 1 : 0
+    logWatchWizard.Add("Text", "x34 y416 w260 h20 +0x200", "Auto-rejoin on disconnect (uses JoinSim)")
+
+    ; --- Action row ---
+    global lwStartBtn := DarkBtn(logWatchWizard, "x135 y452 w80 h28", "Start", _RED_BGR, _DK_BG, -12, false)
     lwStartBtn.OnEvent("Click", LwStartWatch)
 
-    lwDiscordHelpBtn := DarkBtn(logWatchWizard, "x320 y350 w24 h28", "?", _RED_BGR, _DK_BG, -11, true)
+    lwDiscordHelpBtn := DarkBtn(logWatchWizard, "x310 y452 w32 h28", "?", _RED_BGR, _DK_BG, -11, true)
     lwDiscordHelpBtn.OnEvent("Click", LwShowDiscordHelp)
 
     ; Load saved values into edit fields
@@ -2659,7 +2841,7 @@ LogWatchShowWizard(*) {
     }
 
     logWatchWizard.OnEvent("Close", (*) => LwCloseWizard())
-    logWatchWizard.Show("w350 h420")
+    logWatchWizard.Show("w358 h496")
     LwPresetChanged()
 }
 
@@ -2667,19 +2849,17 @@ LwPresetChanged(*) {
     global lwPresetDDL, lwWordsLbl, lwWordsEdit, lwThreshLbl, lwThreshEdit
     global lwThresholdY
     if (lwPresetDDL.Value = 1) {
-        ; Structures Destroyed - hide words
+        ; Structures Destroyed - hide words, move threshold up into that row
         lwWordsLbl.Visible := false
         lwWordsEdit.Visible := false
-        ; Move threshold up to where words was
-        lwThreshLbl.Y := 78
-        lwThreshEdit.Y := 76
+        lwThreshLbl.Y := 82
+        lwThreshEdit.Y := 80
     } else {
-        ; Custom - show words
+        ; Custom - show words, threshold sits on its own row
         lwWordsLbl.Visible := true
         lwWordsEdit.Visible := true
-        ; Move threshold back down
-        lwThreshLbl.Y := 108
-        lwThreshEdit.Y := 106
+        lwThreshLbl.Y := 114
+        lwThreshEdit.Y := 112
     }
 }
 
@@ -2726,7 +2906,7 @@ LwToggleResize(*) {
 }
 
 LwExitResize() {
-    global logWatchResizing, lwScanBtn, lwScanInfoTxt, lwStatusTxt
+    global logWatchResizing, lwScanBtn, lwStatusTxt
     if (!logWatchResizing)
         return
     logWatchResizing := false
@@ -2742,7 +2922,6 @@ LwExitResize() {
     try Hotkey("$Enter", "Off")
     try Hotkey("$Escape", "Off")
     LwHideScanOverlay()
-    lwScanInfoTxt.Text := logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
     lwStatusTxt.Text := "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
     LogWatchSaveSettings()
 }
@@ -2757,6 +2936,26 @@ LwHideOverlayToggle(*) {
     LogWatchSaveSettings()
 }
 
+LwResetScanAreaDefault(*) {
+    global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH
+    global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    global LOG_WATCH_DEFAULT_BASE_X, LOG_WATCH_DEFAULT_BASE_Y, LOG_WATCH_DEFAULT_BASE_W, LOG_WATCH_DEFAULT_BASE_H
+    global lwStatusTxt, logWatchResizing
+    logWatchScanBaseX := LOG_WATCH_DEFAULT_BASE_X
+    logWatchScanBaseY := LOG_WATCH_DEFAULT_BASE_Y
+    logWatchScanBaseW := LOG_WATCH_DEFAULT_BASE_W
+    logWatchScanBaseH := LOG_WATCH_DEFAULT_BASE_H
+    LogWatchScaleScanArea()
+    try lwStatusTxt.Value := "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
+    LogWatchSaveSettings()
+    if (logWatchResizing) {
+        LwHideScanOverlay()
+        LwShowScanOverlay()
+    }
+    ToolTip("Default scan area applied", 0, 0)
+    SetTimer(() => ToolTip(), -1500)
+}
+
 LwLockResetChanged(*) {
     global lwLockResetCB, lwLockResetEdit
     global logWatchLockReset, logWatchLockResetSec
@@ -2768,11 +2967,17 @@ LwLockResetChanged(*) {
 
 LwResizeCancel(*) {
     global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH, widthmultiplier, heightmultiplier
     if (logWatchResizing) {
         logWatchScanX := logWatchScanX_BeforeResize
         logWatchScanY := logWatchScanY_BeforeResize
         logWatchScanW := logWatchScanW_BeforeResize
         logWatchScanH := logWatchScanH_BeforeResize
+        ; Restore base values from restored scaled values
+        logWatchScanBaseX := Round(logWatchScanX / widthmultiplier)
+        logWatchScanBaseY := Round(logWatchScanY / heightmultiplier)
+        logWatchScanBaseW := Round(logWatchScanW / widthmultiplier)
+        logWatchScanBaseH := Round(logWatchScanH / heightmultiplier)
         LwExitResize()
     }
 }
@@ -2782,45 +2987,55 @@ LwResizeDone(*) {
 }
 
 LwResizeUp(*) {
-    global logWatchScanH, logWatchScanY
+    global logWatchScanH, logWatchScanY, logWatchScanBaseH, logWatchScanBaseY, widthmultiplier, heightmultiplier
     logWatchScanH := Max(20, logWatchScanH - 10)
     logWatchScanY := logWatchScanY + 5
+    logWatchScanBaseH := Round(logWatchScanH / widthmultiplier)
+    logWatchScanBaseY := Round(logWatchScanY / heightmultiplier)
     LwShowScanOverlay()
 }
 LwResizeDown(*) {
-    global logWatchScanH
+    global logWatchScanH, logWatchScanBaseH, widthmultiplier
     logWatchScanH := Max(20, logWatchScanH + 10)
+    logWatchScanBaseH := Round(logWatchScanH / widthmultiplier)
     LwShowScanOverlay()
 }
 LwResizeLeft(*) {
-    global logWatchScanW, logWatchScanX
+    global logWatchScanW, logWatchScanX, logWatchScanBaseW, logWatchScanBaseX, widthmultiplier
     logWatchScanW := Max(40, logWatchScanW - 10)
     logWatchScanX := logWatchScanX + 5
+    logWatchScanBaseW := Round(logWatchScanW / widthmultiplier)
+    logWatchScanBaseX := Round(logWatchScanX / widthmultiplier)
     LwShowScanOverlay()
 }
 LwResizeRight(*) {
-    global logWatchScanW
+    global logWatchScanW, logWatchScanBaseW, widthmultiplier
     logWatchScanW := Max(40, logWatchScanW + 10)
+    logWatchScanBaseW := Round(logWatchScanW / widthmultiplier)
     LwShowScanOverlay()
 }
 LwMoveUp(*) {
-    global logWatchScanY
+    global logWatchScanY, logWatchScanBaseY, heightmultiplier
     logWatchScanY := Max(0, logWatchScanY - 10)
+    logWatchScanBaseY := Round(logWatchScanY / heightmultiplier)
     LwShowScanOverlay()
 }
 LwMoveDown(*) {
-    global logWatchScanY
+    global logWatchScanY, logWatchScanBaseY, heightmultiplier
     logWatchScanY := Min(A_ScreenHeight - 20, logWatchScanY + 10)
+    logWatchScanBaseY := Round(logWatchScanY / heightmultiplier)
     LwShowScanOverlay()
 }
 LwMoveLeft(*) {
-    global logWatchScanX
+    global logWatchScanX, logWatchScanBaseX, widthmultiplier
     logWatchScanX := Max(0, logWatchScanX - 10)
+    logWatchScanBaseX := Round(logWatchScanX / widthmultiplier)
     LwShowScanOverlay()
 }
 LwMoveRight(*) {
-    global logWatchScanX
+    global logWatchScanX, logWatchScanBaseX, widthmultiplier
     logWatchScanX := Min(A_ScreenWidth - 40, logWatchScanX + 10)
+    logWatchScanBaseX := Round(logWatchScanX / widthmultiplier)
     LwShowScanOverlay()
 }
 
@@ -2862,34 +3077,21 @@ LwHideScanOverlay() {
 ; Persistent tooltip shown at top of screen while Log Watch is running
 global lwStatusTooltipGui := ""
 global lwStatusTooltipLabel := ""
+global lwStatusTooltipMsg := ""
 
 LwShowStatusTooltip(msg) {
-    global lwStatusTooltipGui, lwStatusTooltipLabel
-    LwHideStatusTooltip()
-    ; Create a small overlay at top-left corner of screen
-    lwStatusTooltipGui := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20")
-    lwStatusTooltipGui.BackColor := "1A1A1A"
-    lwStatusTooltipGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
-    lwStatusTooltipLabel := lwStatusTooltipGui.Add("Text",, msg)
-    ; Position at top-left
-    lwStatusTooltipGui.Show("x0 y0 NoActivate")
+    global lwStatusTooltipMsg := msg
+    ToolTip(msg, 0, 0, 19)
 }
 
 LwUpdateStatusTooltip(msg) {
-    global lwStatusTooltipGui, lwStatusTooltipLabel
-    if (lwStatusTooltipGui != "" && lwStatusTooltipLabel != "") {
-        try lwStatusTooltipLabel.Value := msg
-    } else {
-        LwShowStatusTooltip(msg)
-    }
+    global lwStatusTooltipMsg := msg
+    ToolTip(msg, 0, 0, 19)
 }
 
 LwHideStatusTooltip() {
-    global lwStatusTooltipGui
-    if (lwStatusTooltipGui != "") {
-        try lwStatusTooltipGui.Destroy()
-        lwStatusTooltipGui := ""
-    }
+    global lwStatusTooltipMsg := ""
+    ToolTip(,,,19)
 }
 
 LwSelectScanArea(*) {
@@ -2897,7 +3099,7 @@ LwSelectScanArea(*) {
     global logWatchScanX_BeforeResize, logWatchScanY_BeforeResize
     global logWatchScanW_BeforeResize, logWatchScanH_BeforeResize
     global logWatchWizard
-    global lwScanInfoTxt, lwStatusTxt
+    global lwStatusTxt
 
     ; Save current values in case user presses Escape
     logWatchScanX_BeforeResize := logWatchScanX
@@ -2925,9 +3127,14 @@ LwSelectScanArea(*) {
         logWatchScanY := Min(startY, endY)
         logWatchScanW := Abs(endX - startX)
         logWatchScanH := Abs(endY - startY)
+        ; Update base values for multi-resolution support
+        global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH, widthmultiplier, heightmultiplier
+        logWatchScanBaseX := Round(logWatchScanX / widthmultiplier)
+        logWatchScanBaseY := Round(logWatchScanY / heightmultiplier)
+        logWatchScanBaseW := Round(logWatchScanW / widthmultiplier)
+        logWatchScanBaseH := Round(logWatchScanH / heightmultiplier)
 
         try logWatchWizard.Show()
-        lwScanInfoTxt.Text := logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
         lwStatusTxt.Text := "Scan area: " logWatchScanX "," logWatchScanY " " logWatchScanW "x" logWatchScanH
         LogWatchSaveSettings()
     } else {
@@ -2937,14 +3144,43 @@ LwSelectScanArea(*) {
     }
 }
 
+LwLogMsg(msg) {
+    global lwLog
+    ts := FormatTime("", "HH:mm:ss")
+    lwLog.Push(ts " " msg)
+    if (lwLog.Length > 500)
+        lwLog.RemoveAt(1)
+}
+
+LwSamplePx(x, y) {
+    try c := PixelGetColor(x, y)
+    catch
+        c := 0
+    return Format("0x{:06X}", c)
+}
+
 LwStartWatch(*) {
     global logWatchEnabled, logWatchWords, logWatchThreshold, logWatchWebhook, logWatchPing
     global lwWordsEdit, lwThreshEdit, lwWebhookEdit, lwPingEdit, lwStaggerCB, lwStaggerMultEdit, logWatchWizard
-    global lwLockResetCB, lwLockResetEdit
+    global lwLockResetCB, lwLockResetEdit, logWatchStartBtn
     global logWatchStagger, logWatchStaggerMult, logWatchBtn, logWatchLockReset, logWatchLockResetSec
+
+    ; Popcorn key gate: auto-rejoin needs the inventory key. If user hasn't gated yet, prompt and bail.
+    if (lwRejoinCB.Value) {
+        savedInvGate := IniRead(A_ScriptDir "\AIO_config.ini", "Popcorn", "InvKey", "")
+        if (savedInvGate = "")
+            savedInvGate := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "InventoryKey", "")
+        if (savedInvGate = "") {
+            ToolTip("Set your keys first (needed for auto-rejoin)", 0, 0)
+            SetTimer(() => ToolTip(), -2500)
+            try PcShowSetKeysForm()
+            return
+        }
+    }
 
     global logWatchWebhook := Trim(lwWebhookEdit.Value)
     global logWatchPing := Trim(lwPingEdit.Value)
+    global logWatchPingRole := lwPingRoleCb.Value ? true : false
     global logWatchStagger := lwStaggerCB.Value ? true : false
     global logWatchStaggerMult := Integer(lwStaggerMultEdit.Value)
     if (logWatchStaggerMult < 2)
@@ -2953,6 +3189,8 @@ LwStartWatch(*) {
     global logWatchLockResetMin := Integer(lwLockResetEdit.Value)
     if (logWatchLockResetMin < 1)
         logWatchLockResetMin := 1
+    global logWatchAttachScreenshot := lwAttachScreenshotCB.Value ? true : false
+    global logWatchRejoinEnabled := lwRejoinCB.Value ? true : false
     LogWatchSaveSettings()
 
     wordsStr := Trim(lwWordsEdit.Value)
@@ -2982,7 +3220,7 @@ LwStartWatch(*) {
 
     global logWatchDetectionLabel := ""
     if (lwPresetDDL.Value = 1) {
-        logWatchDetectionLabel := "Your Structures were Destroyed"
+        logWatchDetectionLabel := "Structures destroyed"
     } else {
         logWatchDetectionLabel := wordsStr
     }
@@ -2993,22 +3231,54 @@ LwStartWatch(*) {
     global logWatchTriggered := false
     try logWatchWizard.Destroy()
     global logWatchWizard := ""
-    DarkBtnText(logWatchBtn, "Stop")
-    LwShowStatusTooltip("Log Watch | Detecting: " . logWatchDetectionLabel)
+    try MainGui.Hide()
+    global guiVisible := false
+    DarkBtnText(logWatchStartBtn, "Stop")
     staggerNote := logWatchStagger ? " (stagger " . logWatchStaggerMult . "x)" : ""
-    ToolTip("Log Watch started`nWatching for: " . wordsStr . "`nThreshold: " . thresh . staggerNote, 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    LwShowStatusTooltip("Log Watch RUNNING | Detecting: " . logWatchDetectionLabel . staggerNote . "`n(press Stop to disable)")
+    LwLogMsg("Log Watch started — words=[" wordsStr "] thresh=" thresh " rejoinEnabled=" logWatchRejoinEnabled)
+    SetTimer(LwScanLoop, 500)
+}
+
+LwStartStop(*) {
+    global logWatchRunning, logWatchStartBtn, logWatchBtn
+    if (logWatchRunning) {
+        LwStopWatch()
+    } else {
+        LwQuickStart()
+    }
+}
+
+LwQuickStart() {
+    global logWatchEnabled, logWatchRunning, logWatchConsecutive, logWatchTriggered, logWatchBtn, logWatchStartBtn
+    global logWatchStagger, logWatchStaggerMult, logWatchDetectionLabel
+    logWatchEnabled := true
+    logWatchRunning := true
+    logWatchConsecutive := 0
+    logWatchTriggered := false
+    DarkBtnText(logWatchStartBtn, "Stop")
+    staggerNote := logWatchStagger ? " (stagger " . logWatchStaggerMult . "x)" : ""
+    LwShowStatusTooltip("Log Watch RUNNING | Detecting: " . logWatchDetectionLabel . staggerNote . "`n(press Stop to disable)")
     SetTimer(LwScanLoop, 500)
 }
 
 LwStopWatch() {
-    global logWatchRunning, logWatchEnabled, logWatchTriggered, logWatchBtn, logWatchConsecutive
+    global logWatchRunning, logWatchEnabled, logWatchTriggered, logWatchBtn, logWatchStartBtn, logWatchConsecutive
+    global logWatchRejoinInProgress, logWatchRejoinPhase, logWatchDcConsecutive, logWatchInGameConsecutive
     logWatchRunning := false
     logWatchEnabled := false
     logWatchTriggered := false
     logWatchConsecutive := 0
+    logWatchRejoinInProgress := false
+    logWatchRejoinPhase := ""
+    logWatchDcConsecutive := 0
+    logWatchInGameConsecutive := 0
     SetTimer(LwScanLoop, 0)
-    DarkBtnText(logWatchBtn, "Configure")
+    SetTimer(LwRejoinPollInGame, 0)
+    SetTimer(LwRejoinWaitWhite, 0)
+    SetTimer(LwRejoinWaitWhiteClear, 0)
+    SetTimer(LwRejoinSettle, 0)
+    DarkBtnText(logWatchStartBtn, "Start")
     LwHideStatusTooltip()
     ToolTip("Log Watch stopped", 0, 0)
     SetTimer(() => ToolTip(), -2000)
@@ -3019,6 +3289,7 @@ LwScanLoop() {
     global logWatchScanW, logWatchScanH, logWatchWords, logWatchThreshold
     global logWatchConsecutive, logWatchTriggered, logWatchStagger, logWatchStaggerMult
     global logWatchLockReset, logWatchLockResetMin
+    global logWatchRejoinEnabled, logWatchRejoinInProgress, logWatchDcConsecutive
     static lockResetStartTime := 0
 
     if (!logWatchRunning || !logWatchEnabled)
@@ -3027,19 +3298,51 @@ LwScanLoop() {
     if (logWatchScanX = 0 || logWatchScanY = 0 || logWatchScanW <= 0 || logWatchScanH <= 0)
         return
 
+    ; Rejoin handler controls scanning while a rejoin runs.
+    if (logWatchRejoinInProgress)
+        return
+
+    ; Disconnect detection: requires 2 consecutive menu states to avoid loading-screen flicker.
+    if (logWatchRejoinEnabled) {
+        dcState := ""
+        try dcState := CheckState()
+        if (dcState = "MainMenu" || dcState = "ConnectionTimeout") {
+            logWatchDcConsecutive++
+            if (logWatchDcConsecutive >= 2) {
+                logWatchDcConsecutive := 0
+                LwTriggerRejoin()
+            }
+            return
+        }
+        logWatchDcConsecutive := 0
+    }
+
     ocrText := ""
+    ocrTextRaw := ""
     try {
-        ocrText := OCR.FromRect(logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, {scale: 2}).Text
-        ocrText := StrLower(ocrText)
+        ocrResult := OCR.FromRect(logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, {scale: 2})
+        ocrTextRaw := ocrResult.Text
+        ocrText := StrLower(ocrTextRaw)
     } catch as e {
         Sleep(100)
         return
     }
 
-    allFound := true
-    for _, word in logWatchWords {
-        if (!InStr(ocrText, StrLower(word))) {
-            allFound := false
+    ; Split OCR into individual events (each starts with "Day ")
+    ocrText := RegExReplace(ocrTextRaw, "i)(?=Day\s)", "`n")
+    allFound := false
+    ; Check each event line — all trigger words must be on the SAME line
+    for line in StrSplit(ocrText, "`n", "`r") {
+        ll := StrLower(line)
+        foundThisLine := true
+        for _, word in logWatchWords {
+            if (!InStr(ll, StrLower(word))) {
+                foundThisLine := false
+                break
+            }
+        }
+        if (foundThisLine) {
+            allFound := true
             break
         }
     }
@@ -3047,18 +3350,20 @@ LwScanLoop() {
     if (allFound) {
         global logWatchConsecutive := logWatchConsecutive + 1
 
+        ; Build words string for Discord message
+        wordsStr := ""
+        for i, w in logWatchWords {
+            wordsStr .= (i > 1 ? ", " : "") w
+        }
+
         if (logWatchTriggered) {
             ; Already triggered once
             if (logWatchLockReset && lockResetStartTime > 0) {
-                ; Check if lock reset timer expired (convert minutes to seconds)
+                ; Check if lock reset timer expired (seconds)
                 elapsed := (A_TickCount - lockResetStartTime) / 1000
-                if (elapsed >= logWatchLockResetMin * 60) {
+                if (elapsed >= logWatchLockResetMin) {
                     ; Send another ping
-                    wordsStr := ""
-                    for i, w in logWatchWords {
-                        wordsStr .= (i > 1 ? ", " : "") w
-                    }
-                    LwSendDiscord(wordsStr)
+                    LwSendDiscord(wordsStr, ocrTextRaw)
                     lockResetStartTime := A_TickCount
                     logWatchConsecutive := 0
                 }
@@ -3072,11 +3377,7 @@ LwScanLoop() {
             effectiveThresh := logWatchThreshold * logWatchStaggerMult
         }
         if (logWatchConsecutive >= effectiveThresh) {
-            wordsStr := ""
-            for i, w in logWatchWords {
-                wordsStr .= (i > 1 ? ", " : "") w
-            }
-            LwSendDiscord(wordsStr)
+            LwSendDiscord(wordsStr, ocrTextRaw)
             global logWatchConsecutive := 0
             global logWatchTriggered := true
             if (logWatchLockReset) {
@@ -3101,15 +3402,26 @@ LwTestDiscord(*) {
         return
     }
     ping := Trim(lwPingEdit.Value)
-    pingMention := ping != "" ? "<@" . ping . ">" : ""
+    if (ping != "") {
+        if (lwPingRoleCb.Value)
+            pingMention := "<@&" . ping . ">"
+        else
+            pingMention := "<@" . ping . ">"
+    } else
+        pingMention := ""
     unixTs := DateDiff(A_NowUTC, "19700101000000", "Seconds")
     parts := []
     if (pingMention != "")
         parts.Push(pingMention)
     parts.Push("<t:" . unixTs . ":R>")
     parts.Push("Test notification from Log Watch - if you see this, your webhook is working!")
-    content := StrJoin("`n", parts*)
-    discordJson := '{"content":"' . content . '"}'
+    content := ""
+    for i, part in parts
+        content .= (i > 1 ? "`n" : "") . part
+    content := StrReplace(content, "\", "\\")
+    content := StrReplace(content, "`n", "\n")
+    content := StrReplace(content, "`t", "\t")
+    discordJson := "{" . CHR(34) . "content" . CHR(34) . ":" . CHR(34) . content . CHR(34) . "}"
     try {
         WHR := ComObject("WinHttp.WinHttpRequest.5.1")
         WHR.Open("POST", webhook, false)
@@ -3123,34 +3435,422 @@ LwTestDiscord(*) {
     }
 }
 
-LwSendDiscord(wordsStr) {
-    global logWatchWebhook, logWatchPing, logWatchDetectionLabel
+LwSendDiscord(wordsStr, ocrTextRaw:="") {
+    global logWatchWebhook, logWatchPing, logWatchDetectionLabel, logWatchAttachScreenshot
+    global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
     if (logWatchWebhook = "")
         return
 
-    ; Discord mention format <@user_id> or <@&role_id>
-    pingMention := logWatchPing != "" ? "<@" . logWatchPing . ">" : ""
+    ; Discord mention: user IDs get <@ID>, role IDs use <@&ID>
+    if (logWatchPing != "") {
+        if (logWatchPingRole)
+            pingMention := "<@&" . logWatchPing . ">"
+        else
+            pingMention := "<@" . logWatchPing . ">"
+    } else
+        pingMention := ""
     ; Discord relative timestamp: <t:unix:R> shows "x time ago"
     ; Compute Unix timestamp from system clock
     unixTs := DateDiff(A_NowUTC, "19700101000000", "Seconds")
     ; Message text: detection label (preset) or words (custom)
-    msgText := logWatchDetectionLabel != "" ? logWatchDetectionLabel : wordsStr
+    msgTextBase := logWatchDetectionLabel != "" ? logWatchDetectionLabel : wordsStr
 
-    ; Build multi-line content: ping (optional), timestamp, message
-    contentParts := []
-    if (pingMention != "")
-        contentParts.Push(pingMention)
-    contentParts.Push("<t:" . unixTs . ":R>")
-    contentParts.Push(msgText)
-    content := StrJoin("`n", contentParts*)
-    discordJson := '{"content":"' . content . '"}'
+    ; Screenshot path skips filtered log since the image shows it. Text fallback still appends it.
+    msgTextWithLog := msgTextBase
+    if (ocrTextRaw) {
+        filtered := FilterARKLog(ocrTextRaw)
+        if (filtered != "")
+            msgTextWithLog := msgTextBase . "`n`n**Filtered Log:**`n" . filtered
+    }
+
+    ; Opt-in: attach screenshot of scan area via curl multipart.
+    ; On capture failure fall through to WinHttp text-only (with filtered log) so notification still fires.
+    if (logWatchAttachScreenshot && logWatchScanW > 0 && logWatchScanH > 0) {
+        imgPath := A_Temp . "\lw_" . A_TickCount . ".png"
+        if (LwCaptureScreenshot(logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, imgPath)) {
+            contentNoLog := LwBuildDiscordContent(pingMention, unixTs, msgTextBase)
+            if (LwSendDiscordMultipart(contentNoLog, imgPath))
+                return
+        }
+    }
+
+    content := LwBuildDiscordContent(pingMention, unixTs, msgTextWithLog)
 
     try {
         WHR := ComObject("WinHttp.WinHttpRequest.5.1")
         WHR.Open("POST", logWatchWebhook, false)
         WHR.SetRequestHeader("Content-Type", "application/json")
-        WHR.Send(discordJson)
+        jsonContent := "{" . CHR(34) . "content" . CHR(34) . ":" . CHR(34) . content . CHR(34) . "}"
+        WHR.Send(jsonContent)
+    } catch {
+        ; Failed to send
     }
+}
+
+; Capture a rect of the primary display into a PNG via GDI+.
+; Returns true on success, false on any failure.
+LwCaptureScreenshot(x, y, w, h, outPath) {
+    if (w <= 0 || h <= 0)
+        return false
+    gdipToken := 0
+    _siBuf := Buffer(24, 0)
+    NumPut("UInt", 1, _siBuf, 0)
+    if (DllCall("gdiplus\GdiplusStartup", "Ptr*", &gdipToken, "Ptr", _siBuf, "Ptr", 0) != 0 || gdipToken = 0)
+        return false
+
+    screenDC := DllCall("GetDC", "Ptr", 0, "Ptr")
+    memDC := DllCall("CreateCompatibleDC", "Ptr", screenDC, "Ptr")
+    hBitmap := DllCall("CreateCompatibleBitmap", "Ptr", screenDC, "Int", w, "Int", h, "Ptr")
+    oldBitmap := DllCall("SelectObject", "Ptr", memDC, "Ptr", hBitmap)
+    DllCall("BitBlt", "Ptr", memDC, "Int", 0, "Int", 0, "Int", w, "Int", h, "Ptr", screenDC, "Int", x, "Int", y, "UInt", 0x00CC0020)
+    DllCall("SelectObject", "Ptr", memDC, "Ptr", oldBitmap)
+
+    pBitmap := 0
+    ok := false
+    if (DllCall("gdiplus\GdipCreateBitmapFromHBITMAP", "Ptr", hBitmap, "Ptr", 0, "Ptr*", &pBitmap) = 0 && pBitmap) {
+        ; PNG encoder CLSID: 557CF406-1A04-11D3-9A73-0000F81EF32E
+        clsidBuf := Buffer(16, 0)
+        DllCall("ole32\CLSIDFromString", "WStr", "{557CF406-1A04-11D3-9A73-0000F81EF32E}", "Ptr", clsidBuf)
+        if (DllCall("gdiplus\GdipSaveImageToFile", "Ptr", pBitmap, "WStr", outPath, "Ptr", clsidBuf, "Ptr", 0) = 0)
+            ok := true
+        DllCall("gdiplus\GdipDisposeImage", "Ptr", pBitmap)
+    }
+
+    DllCall("DeleteObject", "Ptr", hBitmap)
+    DllCall("DeleteDC", "Ptr", memDC)
+    DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+    DllCall("gdiplus\GdiplusShutdown", "Ptr", gdipToken)
+    return ok
+}
+
+; Send Discord message with attached PNG via curl.exe multipart POST.
+; Uses payload_json read from temp file to avoid command-line escaping.
+; Returns true if the curl process launched, false otherwise.
+LwSendDiscordMultipart(content, imgPath) {
+    global logWatchWebhook
+    if (logWatchWebhook = "" || !FileExist(imgPath))
+        return false
+    jsonPath := A_Temp . "\lw_json_" . A_TickCount . ".json"
+    json := "{" . CHR(34) . "content" . CHR(34) . ":" . CHR(34) . content . CHR(34) . "}"
+    try {
+        FileAppend(json, jsonPath, "UTF-8")
+    } catch {
+        return false
+    }
+    cmd := 'curl.exe -s -m 10 -X POST '
+         . '-F "payload_json=<' . jsonPath . '" '
+         . '-F "file=@' . imgPath . ';type=image/png" '
+         . '"' . logWatchWebhook . '"'
+    try {
+        Run(cmd, , "Hide")
+    } catch {
+        LwCleanupFile(jsonPath)
+        LwCleanupFile(imgPath)
+        return false
+    }
+    ; Cleanup after curl should be done. 10s covers the -m 10 timeout.
+    SetTimer(() => LwCleanupFile(jsonPath), -11000)
+    SetTimer(() => LwCleanupFile(imgPath), -11000)
+    return true
+}
+
+LwCleanupFile(path) {
+    try FileDelete(path)
+}
+
+; Build JSON-escaped content string for Discord webhook body.
+LwBuildDiscordContent(pingMention, unixTs, body) {
+    parts := []
+    if (pingMention != "")
+        parts.Push(pingMention)
+    parts.Push("<t:" . unixTs . ":R>")
+    parts.Push(body)
+    out := ""
+    for i, part in parts
+        out .= (i > 1 ? "`n" : "") . part
+    out := StrReplace(out, "\", "\\")
+    out := StrReplace(out, "`n", "\n")
+    out := StrReplace(out, "`t", "\t")
+    return out
+}
+
+LwTriggerRejoin() {
+    global logWatchRejoinInProgress, logWatchRejoinPhase, logWatchRejoinStartTick
+    global logWatchInGameConsecutive, useLast, AutoSimCheck, UseLastChk
+    LwLogMsg("LwTriggerRejoin fired")
+    simTarget := ""
+    try simTarget := ServerNumberEdit.Text
+    LwLogMsg("  simTarget='" simTarget "'  useLast=" useLast "  AutoSimCheck=" AutoSimCheck)
+    if (!useLast && Trim(simTarget) = "") {
+        LwLogMsg("  no server in sim field — auto-enabling Use Last")
+        global useLast := true
+        try UseLastChk.Value := 1
+    }
+    logWatchRejoinInProgress := true
+    logWatchRejoinPhase := "joining"
+    logWatchRejoinStartTick := A_TickCount
+    logWatchInGameConsecutive := 0
+    LwLogMsg("  sending Escape x2 to clear popups")
+    try SendWindow("{Escape}")
+    Sleep(150)
+    try SendWindow("{Escape}")
+    Sleep(300)
+    if (!AutoSimCheck) {
+        LwLogMsg("  arming JoinSim via AutoSimButtonToggle")
+        try AutoSimButtonToggle()
+    } else {
+        LwLogMsg("  JoinSim already armed")
+    }
+    LwLogMsg("  starting LwRejoinPollInGame @1s")
+    SetTimer(LwRejoinPollInGame, 1000)
+}
+
+LwRejoinPollInGame() {
+    global logWatchRejoinInProgress, logWatchRunning, logWatchRejoinStartTick
+    global logWatchInGameConsecutive, AutoSimCheck
+    if (!logWatchRejoinInProgress || !logWatchRunning) {
+        SetTimer(LwRejoinPollInGame, 0)
+        return
+    }
+    if (A_TickCount - logWatchRejoinStartTick > 300000) {
+        LwLogMsg("PollInGame: 5min overall timeout — aborting")
+        LwStopRejoin("rejoin timed out after 5 min")
+        return
+    }
+    currentState := ""
+    try currentState := CheckState()
+    menuStates := Map("MainMenu", 1, "ConnectionTimeout", 1, "WaitingToJoin", 1
+                    , "ServerBrowser", 1, "ServerSelected", 1, "NoSessions", 1
+                    , "ServerFull", 1, "ServerFull2", 1, "ServerFull3", 1
+                    , "ModMenu", 1, "ContentFailed", 1, "MiddleMenu", 1
+                    , "SinglePlayer", 1)
+    global widthmultiplier, heightmultiplier, invyDetectX, invyDetectY
+    invCol := LwSamplePx(invyDetectX, invyDetectY)
+    fsCol  := LwSamplePx(Integer(225*widthmultiplier), Integer(277*heightmultiplier))
+    cxCol  := LwSamplePx(Integer(1280*widthmultiplier), Integer(720*heightmultiplier))
+    if (menuStates.Has(currentState)) {
+        if (logWatchInGameConsecutive > 0)
+            LwLogMsg("PollInGame: back at menu='" currentState "' — reset consec")
+        logWatchInGameConsecutive := 0
+        return
+    }
+    logWatchInGameConsecutive++
+    LwLogMsg("PollInGame: state='" currentState "' consec=" logWatchInGameConsecutive "/5  inv=" invCol " slot1=" fsCol " center=" cxCol)
+    if (logWatchInGameConsecutive >= 5) {
+        SetTimer(LwRejoinPollInGame, 0)
+        LwLogMsg("PollInGame: in-game confirmed — entering waitWhite (sim stays armed)")
+        global logWatchRejoinPhase := "waitWhite"
+        global logWatchRejoinPhaseTick := A_TickCount
+        SetTimer(LwRejoinWaitWhite, 1000)
+    }
+}
+
+LwRejoinIsMenuState() {
+    state := ""
+    try state := CheckState()
+    menuStates := Map("MainMenu", 1, "ConnectionTimeout", 1, "WaitingToJoin", 1
+                    , "ServerBrowser", 1, "ServerSelected", 1, "NoSessions", 1
+                    , "ServerFull", 1, "ServerFull2", 1, "ServerFull3", 1
+                    , "ModMenu", 1, "ContentFailed", 1, "MiddleMenu", 1
+                    , "SinglePlayer", 1)
+    return menuStates.Has(state)
+}
+
+LwRejoinCenterColorSum() {
+    global widthmultiplier, heightmultiplier
+    cx := Integer(1280 * widthmultiplier)
+    cy := Integer(720  * heightmultiplier)
+    col := PxGet(cx, cy)
+    colInt := Integer("0x" SubStr(col, 3))
+    r := (colInt >> 16) & 0xFF, g := (colInt >> 8) & 0xFF, b := colInt & 0xFF
+    return { sum: r+g+b, col: col, x: cx, y: cy }
+}
+
+LwRejoinWaitWhite() {
+    global logWatchRejoinInProgress, logWatchRunning, logWatchRejoinStartTick
+    global logWatchRejoinPhaseTick, logWatchRejoinPhase, logWatchInGameConsecutive
+    static pollN := 0
+    static sawWhite := false
+    if (!logWatchRejoinInProgress || !logWatchRunning) {
+        SetTimer(LwRejoinWaitWhite, 0)
+        pollN := 0
+        sawWhite := false
+        return
+    }
+    if (A_TickCount - logWatchRejoinStartTick > 300000) {
+        LwLogMsg("WaitLoadClear: 5min overall timeout — aborting")
+        LwStopRejoin("rejoin timed out after 5 min")
+        pollN := 0
+        sawWhite := false
+        return
+    }
+    if (LwRejoinIsMenuState()) {
+        LwLogMsg("WaitLoadClear: bounced to menu — restart PollInGame")
+        SetTimer(LwRejoinWaitWhite, 0)
+        logWatchRejoinPhase := "joining"
+        logWatchInGameConsecutive := 0
+        pollN := 0
+        sawWhite := false
+        SetTimer(LwRejoinPollInGame, 1000)
+        return
+    }
+    pollN++
+    info := LwRejoinCenterColorSum()
+    global invyDetectX, invyDetectY, widthmultiplier, heightmultiplier
+    invCol := LwSamplePx(invyDetectX, invyDetectY)
+    fsCol  := LwSamplePx(Integer(225*widthmultiplier), Integer(277*heightmultiplier))
+    LwLogMsg("WaitLoadClear: poll " pollN " center=" info.col " sum=" info.sum " sawWhite=" sawWhite "  inv=" invCol " slot1=" fsCol)
+    if (info.sum >= 680) {
+        if (!sawWhite)
+            LwLogMsg("WaitLoadClear: white flash detected (sum=" info.sum ") — waiting for fade")
+        sawWhite := true
+        return
+    }
+    if (sawWhite) {
+        LwLogMsg("WaitLoadClear: white faded (sum=" info.sum ") — queueing settle (+2500ms)")
+        SetTimer(LwRejoinWaitWhite, 0)
+        pollN := 0
+        sawWhite := false
+        SetTimer(LwRejoinSettle, -2500)
+        return
+    }
+    if (info.sum >= 90 && pollN >= 3) {
+        LwLogMsg("WaitLoadClear: no flash, scene rendered (sum=" info.sum ") — queueing settle (+2500ms)")
+        SetTimer(LwRejoinWaitWhite, 0)
+        pollN := 0
+        sawWhite := false
+        SetTimer(LwRejoinSettle, -2500)
+        return
+    }
+    if (A_TickCount - logWatchRejoinPhaseTick > 60000) {
+        LwLogMsg("WaitLoadClear: 60s timeout — proceeding to settle anyway")
+        SetTimer(LwRejoinWaitWhite, 0)
+        pollN := 0
+        sawWhite := false
+        SetTimer(LwRejoinSettle, -2500)
+    }
+}
+
+; no-op stub; stop paths still reference it.
+LwRejoinWaitWhiteClear() {
+    SetTimer(LwRejoinWaitWhiteClear, 0)
+}
+
+LwRejoinSettle() {
+    global logWatchRejoinInProgress, logWatchRunning, logWatchRejoinPhase
+    global pcInvKey, widthmultiplier, heightmultiplier, AutoSimCheck
+    global LW_REJOIN_CLICK1_BASE_X, LW_REJOIN_CLICK1_BASE_Y
+    global LW_REJOIN_CLICK2_BASE_X, LW_REJOIN_CLICK2_BASE_Y
+    if (!logWatchRejoinInProgress || !logWatchRunning) {
+        LwLogMsg("Settle: aborted (rejoin cancelled)")
+        return
+    }
+    if (AutoSimCheck) {
+        LwLogMsg("Settle: disarming sim before inv key")
+        try AutoSimButtonToggle()
+    }
+    LwLogMsg("Settle: sending inv key='" pcInvKey "'")
+    if (pcInvKey != "")
+        try SendWindow(pcInvKey)
+    Sleep(1500)
+    c1x := Round(LW_REJOIN_CLICK1_BASE_X * widthmultiplier)
+    c1y := Round(LW_REJOIN_CLICK1_BASE_Y * heightmultiplier)
+    c2x := Round(LW_REJOIN_CLICK2_BASE_X * widthmultiplier)
+    c2y := Round(LW_REJOIN_CLICK2_BASE_Y * heightmultiplier)
+    LwLogMsg("Settle: click1 (" c1x "," c1y ")")
+    try ClickWindow(c1x, c1y)
+    Sleep(600)
+    LwLogMsg("Settle: click2 (" c2x "," c2y ")")
+    try ClickWindow(c2x, c2y)
+    Sleep(200)
+    logWatchRejoinInProgress := false
+    logWatchRejoinPhase := ""
+    LwLogMsg("Settle: done — rejoin complete")
+}
+
+LwStopRejoin(reason) {
+    global logWatchRejoinInProgress, logWatchRejoinPhase, logWatchRunning, logWatchEnabled
+    global logWatchDcConsecutive, logWatchInGameConsecutive
+    LwLogMsg("LwStopRejoin: " reason)
+    SetTimer(LwRejoinPollInGame, 0)
+    SetTimer(LwRejoinWaitWhite, 0)
+    SetTimer(LwRejoinWaitWhiteClear, 0)
+    SetTimer(LwRejoinSettle, 0)
+    logWatchRejoinInProgress := false
+    logWatchRejoinPhase := ""
+    logWatchDcConsecutive := 0
+    logWatchInGameConsecutive := 0
+    logWatchRunning := false
+    logWatchEnabled := false
+    SetTimer(LwScanLoop, 0)
+    try LwSendDiscord("Log Watch stopped: " . reason)
+    ToolTip("Log Watch stopped: " . reason, 0, 0)
+    SetTimer(() => ToolTip(), -4000)
+}
+
+FilterARKLog(rawText) {
+    if (rawText = "")
+        return ""
+    
+    keepPhrases := ["Your Tribe killed", "was destroyed", "Structures were Destroyed", "removed from the Tribe", "demolished a "]
+    excludePhrases := ["froze", "destroyed their"]
+    
+    ; Split on "Day " to separate events (OCR may not have \n between lines)
+    rawText := RegExReplace(rawText, "i)(?=Day\s)", "`n")
+    lines := StrSplit(rawText, "`n", "`r")
+    cleaned := []
+    
+    for i, line in lines {
+        line := Trim(line)
+        if (line = "")
+            continue
+        
+        ; Remove timestamp prefix (Day 8615, 19:42:04: or Day 861 5, 19:41 3:)
+        line := RegExReplace(line, "i)^Day\s+\d+[\s,]*\d*[\s,:]*\d*[:\s]*", "")
+        line := Trim(line)
+        
+        lowerLine := StrLower(line)
+        
+        skip := false
+        for idx, ex in excludePhrases {
+            if InStr(lowerLine, ex) {
+                skip := true
+                break
+            }
+        }
+        if (skip)
+            continue
+        
+        keep := false
+        for idx, kp in keepPhrases {
+            if InStr(lowerLine, StrLower(kp)) {
+                keep := true
+                break
+            }
+        }
+        
+        if (keep) {
+            ; Fix common OCR errors
+            line := RegExReplace(line, "i)Lvi", "Lvl")
+            line := RegExReplace(line, "i)l!", "1!")
+            line := RegExReplace(line, "i)destroye[d]?l?", "destroyed")
+            ; Fix g/d confusions: gestroyed -> destroyed, daq -> bag
+            line := RegExReplace(line, "i)gestroy", "destroy")
+            line := RegExReplace(line, "i)daq", "bag")
+            ; Fix trailing !/i confusion: destroyedi at end -> destroyed!
+            line := RegExReplace(line, "i)destroyedi$", "destroyed!")
+            cleaned.Push(line)
+        }
+    }
+    
+    result := ""
+    for idx, ln in cleaned {
+        if (result != "")
+            result .= "`n"
+        result .= ln
+    }
+    
+    return result
 }
 
 LwCloseWizard(*) {
@@ -3168,22 +3868,33 @@ LwShowHelp(*) {
     }
     hGui := Gui("+AlwaysOnTop +ToolWindow", "Log Watch Help")
     hGui.BackColor := "1A1A1A"
-    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     hGui.Add("Text", "x10 y8 w300", "LOG WATCH")
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
-    hGui.Add("Text", "x10 y30 w300",
-        "Watches log via OCR and triggers when words appear.`n`n"
-        "Preset: Choose Structures Destroyed (default) or Custom.`n"
-        "Custom: enter words separated by commas.`n"
-        "Words must appear in any order in scanned region.`n`n"
-        "Threshold: consecutive detections before triggering.`n`n"
-        "Stagger: after 1st trigger, require Threshold x Mult more`n"
-        " detections before re-triggering (avoids spam).`n`n"
-        "Lock Reset: if words persist, re-triggers after X min.`n`n"
-        "@ field: Discord user ID — results in <@ID> ping.`n"
-        "Discord message uses <t:timestamp:R> (relative time).")
+    hGui.Add("Text", "x10 y30 w360",
+        "OCR watches the tribe log and posts to Discord when your words appear.`n`n"
+        "DETECTION`n"
+        "Preset: Structures Destroyed (default) or Custom words.`n"
+        "Threshold: consecutive scans needed before a trigger fires.`n`n"
+        "SCAN AREA`n"
+        "Resize: arrow keys + WASD to move/size the red box. Esc or click Resize again to exit.`n"
+        "Default: restore the built-in rect (covers most of the tribe log). Scales to your resolution.`n"
+        "Hide scan outline: dims the red box while resizing.`n`n"
+        "TRIGGER OPTIONS`n"
+        "Anti-spam: after first trigger, require Threshold x Mult more matches before the next one. Stops back-to-back alerts.`n"
+        "Lock Reset (sec): once latched, re-fire after N seconds if the words are still on screen.`n`n"
+        "DISCORD`n"
+        "Webhook: paste the full Discord webhook URL. Test button sends a sample message.`n"
+        "@ field: Discord user ID. Becomes <@ID> ping. Tick Role to ping a role instead (<@&ID>).`n"
+        "Attach screenshot: captures the scan area as PNG and posts it with the alert. Filtered log text is skipped since the image shows it.`n"
+        "Timestamps use <t:unix:R> so Discord renders them relative.`n`n"
+        "AUTO-REJOIN`n"
+        "If the game drops to main menu or connection timeout, JoinSim kicks in using the server set in the JoinSim tab (or Use Last if ticked).`n"
+        "Requires your keys to be set once via Popcorn's Set Keys form. Uses the saved inventory key to re-open inventory after rejoin.`n"
+        "If no target server is set, Log Watch stops and Discord gets notified.`n"
+        "Scan resumes automatically once you are back in-world.")
     hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
-    hGui.Show("w300 h200")
+    hGui.Show("w380 h560")
 }
 
 LwShowDiscordHelp(*) {
@@ -3195,28 +3906,28 @@ LwShowDiscordHelp(*) {
     }
     hGui := Gui("+AlwaysOnTop +ToolWindow", "Discord Ping Setup")
     hGui.BackColor := "1A1A1A"
-    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     hGui.Add("Text", "x10 y8 w350", "DISCORD PING SETUP")
     hGui.SetFont("s8 Bold cDDDDDD", "Segoe UI")
-    hGui.Add("Text", "x10 y30 w350", "--- HOW TO GET PINGED ---")
+    hGui.Add("Text", "x10 y30 w350", "--- SETUP ---")
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
     hGui.Add("Text", "x10 y48 w350",
         "1. Enable Developer Mode in Discord:`n"
         "   User Settings > Advanced > Developer Mode`n`n"
-        "2. Copy the webhook URL:`n"
-        "   Server Settings > Integrations > Webhooks`n"
-        "   Copy webhook URL and paste into Discord field`n`n"
-        "3. To ping a user:`n"
-        "   Right-click your name > Copy User ID`n"
-        "   Paste the ID number into the @ field (no @ needed).`n"
-        "   It becomes <@ID> automatically.`n`n"
-        "4. To ping a role:`n"
-        "   Right-click a role > Copy Role ID`n"
-        "   Paste the ID number into the @ field.`n"
-        "   Manually add <@&> prefix: <@&ID>`n"
-        "   Example: <@&123456789012345678>")
+        "2. Create a webhook on your server:`n"
+        "   Server Settings > Integrations > Webhooks > New Webhook`n"
+        "   Copy the webhook URL, paste into the Webhook field.`n"
+        "   Click Test to confirm it works.`n`n"
+        "3. Ping target:`n"
+        "   Right-click your name in Discord > Copy User ID.`n"
+        "   Paste the ID into the @ field (no @ symbol).`n"
+        "   Tick Role if you want to ping a role instead.`n"
+        "   Output becomes <@ID> or <@&ID> on send.`n`n"
+        "4. Optional: tick Attach screenshot to Discord.`n"
+        "   Sends a PNG of the scan area with each alert.`n"
+        "   Uses curl.exe (shipped with Windows 10/11).")
     hGui.OnEvent("Close", (*) => (hGui.Destroy(), hGui := ""))
-    hGui.Show("w370 h280")
+    hGui.Show("w370 h360")
 }
 
 LoadHatchSettings() {
@@ -3300,7 +4011,7 @@ ShowNtfyHelp(*) {
     ntfyHelpGui := Gui("+AlwaysOnTop +Owner", "NTFY Setup")
     ntfyHelpGui.BackColor := "1A1A1A"
 
-    ntfyHelpGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
+    ntfyHelpGui.SetFont("s10 c" _themeHexStr " Bold", "Segoe UI")
     ntfyHelpGui.Add("Text", "x15 y15 w325", "Quick Guide")
 
     ntfyHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
@@ -3329,7 +4040,7 @@ PcShowHelp(*) {
     }
     pcHelpGui := Gui("+AlwaysOnTop +Owner", "Popcorn Help")
     pcHelpGui.BackColor := "1A1A1A"
-    pcHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    pcHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     pcHelpGui.Add("Text", "x15 y15 w305", "Quick Guide")
     pcHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     pcHelpGui.Add("Text", "x15 y38 w305",
@@ -3361,29 +4072,29 @@ NsShowHelp(*) {
     }
     nsHelpGui := Gui("+AlwaysOnTop +Owner", "Hatch & Name Modes")
     nsHelpGui.BackColor := "1A1A1A"
-    nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    nsHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y15 w305", "Quick Guide")
     nsHelpGui.SetFont("s8 cDDDDDD Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y33 w305", "Run at standard gamma")
 
-    nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    nsHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y55 w305", "Hatch")
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y73 w305",
         "All: hatches every egg  |  Single: hatches one at a time`n"
         . StrUpper(pcAccessKey) " at inventory to hatch")
 
-    nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    nsHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y113 w305", "Claim/Name")
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y131 w305", "E on a tame to name it")
 
-    nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    nsHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y153 w305", "Name/Spay")
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y171 w305", "E on a tame to name/spay")
 
-    nsHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    nsHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y195 w305", "Running Together")
     nsHelpGui.SetFont("s9 cDDDDDD", "Segoe UI")
     nsHelpGui.Add("Text", "x15 y213 w305",
@@ -4009,31 +4720,52 @@ lvlStat(amount, x, y) {
 
 claimAndNameEpressed() {
     global nsCryoBtn, widthmultiplier, heightmultiplier, invyDetectX, invyDetectY
-    if (NFIsBright(invyDetectX, invyDetectY))
+    NsLog("[CN] E pressed — starting Claim/Name")
+    nameX := Integer(1034*widthmultiplier)
+    nameY := Integer(665*heightmultiplier)
+    invCol := PxGet(invyDetectX, invyDetectY)
+    NsLog("[CN] invyDetect=(" invyDetectX "," invyDetectY ") col=" invCol)
+    if (NFIsBright(invyDetectX, invyDetectY)) {
+        NsLog("[CN] Inventory open (bright) — aborting")
         return
+    }
+    preCol := PxGet(nameX, nameY)
+    NsLog("[CN] namePix=(" nameX "," nameY ") pre=" preCol " expect=0x94D2EA tol=30")
+    t0 := A_TickCount
     waitNameOpenCount := 0
     waitNameOpen      := true
     _nfB3 := 0
-    while (!NFPixelWait(1034*widthmultiplier, 665*heightmultiplier, 1036*widthmultiplier, 667*heightmultiplier, "0x94D2EA", 30, &_nfB3)) {
+    while (!NFPixelWait(nameX, nameY, nameX+2, nameY+2, "0x94D2EA", 30, &_nfB3)) {
         Sleep(16)
         waitNameOpenCount++
-        if (waitNameOpenCount > 94) {
+        if (Mod(waitNameOpenCount, 20) = 0) {
+            NsLog("[CN] poll " waitNameOpenCount " col=" PxGet(nameX, nameY))
+        }
+        if (waitNameOpenCount > 186) {
             waitNameOpen := false
             break
         }
     }
     if (waitNameOpen) {
+        NsLog("[CN] Name dialog found after " waitNameOpenCount " polls (+" (A_TickCount-t0) "ms) col=" PxGet(nameX, nameY))
+        NsLog("[CN] Click field (" Integer(1241*widthmultiplier) "," Integer(664*heightmultiplier) ")")
         MouseMove(1241*widthmultiplier, 664*heightmultiplier)
         Click
         Sleep(20)
         Send(ClaimAndNameEdit.Text)
+        NsLog("[CN] Sent name text: " ClaimAndNameEdit.Text)
         Sleep(20)
+        NsLog("[CN] Click confirm (" Integer(1122*widthmultiplier) "," Integer(1014*heightmultiplier) ")")
         MouseMove(1122*widthmultiplier, 1014*heightmultiplier)
         Click
         if (nsCryoBtn.Value) {
             Sleep(600)
             Send("{Click}")
+            NsLog("[CN] Cryo click sent")
         }
+        NsLog("[CN] Done")
+    } else {
+        NsLog("[CN] Name dialog NOT found — timeout after " waitNameOpenCount " polls (+" (A_TickCount-t0) "ms) finalCol=" PxGet(nameX, nameY))
     }
 }
 
@@ -4070,21 +4802,27 @@ nameAndSpayEpressed() {
     NsLog("alt2Detect=(" nsAlt2RadialX "," nsAlt2RadialY ")  alt2Click=(" nsAlt2ClickX "," nsAlt2ClickY ")")
     NsLog("spay=(" nsSpayX "," nsSpayY ")  adminDetect=(" nsAdminPixX "," nsAdminPixY ")  adminSpay=(" nsAdminSpayX "," nsAdminSpayY ")")
 
-    ; ── Step 1:────────────────────────
-    NsLog("[1] Waiting for name dialog pixel...")
+    nameX := Integer(1034*widthmultiplier)
+    nameY := Integer(665*heightmultiplier)
+    preCol := PxGet(nameX, nameY)
+    NsLog("[1] Waiting for name dialog pixel (" nameX "," nameY ") pre=" preCol " expect=0x94D2EA tol=30")
+    t1 := A_TickCount
     waitNameOpenCount := 0
     waitNameOpen      := true
     _nfB4 := 0
-    while (!NFPixelWait(1034*widthmultiplier, 665*heightmultiplier, 1036*widthmultiplier, 667*heightmultiplier, "0x94D2EA", 30, &_nfB4)) {
+    while (!NFPixelWait(nameX, nameY, nameX+2, nameY+2, "0x94D2EA", 30, &_nfB4)) {
         Sleep(16)
         waitNameOpenCount++
-        if (waitNameOpenCount > 94) {
+        if (Mod(waitNameOpenCount, 20) = 0) {
+            NsLog("[1] poll " waitNameOpenCount " col=" PxGet(nameX, nameY))
+        }
+        if (waitNameOpenCount > 186) {
             waitNameOpen := false
             break
         }
     }
     if (waitNameOpen) {
-        NsLog("[1] Name dialog found after " waitNameOpenCount " polls — typing name")
+        NsLog("[1] Name dialog found after " waitNameOpenCount " polls (+" (A_TickCount-t1) "ms) col=" PxGet(nameX, nameY))
         MouseMove(1241*widthmultiplier, 664*heightmultiplier)
         Click
         Sleep(20)
@@ -4094,7 +4832,7 @@ nameAndSpayEpressed() {
         Click
         NsLog("[1] Name applied: " ClaimAndNameEdit.Text)
     } else {
-        NsLog("[1] Name dialog NOT found — timed out after " waitNameOpenCount " polls — aborting")
+        NsLog("[1] Name dialog NOT found — timeout after " waitNameOpenCount " polls (+" (A_TickCount-t1) "ms) finalCol=" PxGet(nameX, nameY) " — aborting")
         return
     }
 
@@ -4103,14 +4841,16 @@ nameAndSpayEpressed() {
         return
     }
 
-    ; ── Step 2: ─────────
     NsLog("[2] Waiting 600ms before radial wheel...")
     Sleep(600)
     NsLog("[2] Sending E down (hold)")
     Send("{e down}")
     Sleep(300)
+    NsLog("[2] Pre-scan cols: std=" PxGet(nsRadialX,nsRadialY) " alt=" PxGet(nsAltRadialX,nsAltRadialY) " alt2=" PxGet(nsAlt2RadialX,nsAlt2RadialY))
     radialLayout := "standard"
+    radialPolls  := 0
     loop 20 {
+        radialPolls++
         if (NFSearchTol(&X, &Y, nsAlt2RadialX, nsAlt2RadialY, nsAlt2RadialX+1, nsAlt2RadialY+1, "0xFFFFFF", 10)) {
             radialLayout := "alt2"
             break
@@ -4119,11 +4859,14 @@ nameAndSpayEpressed() {
             radialLayout := "alt"
             break
         }
+        if (NFSearchTol(&X, &Y, nsRadialX, nsRadialY, nsRadialX+1, nsRadialY+1, "0xFFFFFF", 10)) {
+            radialLayout := "standard"
+            break
+        }
         Sleep(20)
     }
-    NsLog("[2] Radial wheel open — layout=" radialLayout)
+    NsLog("[2] Radial detect after " radialPolls " polls — layout=" radialLayout " cols: std=" PxGet(nsRadialX,nsRadialY) " alt=" PxGet(nsAltRadialX,nsAltRadialY) " alt2=" PxGet(nsAlt2RadialX,nsAlt2RadialY))
 
-    ; ── Step 3: ───────────────────
     if (radialLayout = "alt") {
         NsLog("[3] Alt radial — clicking (" nsAltClickX "," nsAltClickY ")")
         MouseMove(nsAltClickX, nsAltClickY, 0)
@@ -4139,7 +4882,7 @@ nameAndSpayEpressed() {
     NsLog("[3] Clicked radial option")
     Sleep(100)
 
-    ; ── Step 4: ──────────
+    NsLog("[4] Admin pix col=" PxGet(nsAdminPixX, nsAdminPixY) " spay pix col=" PxGet(nsSpayX, nsSpayY))
     isAdmin := NFSearchTol(&X, &Y, nsAdminPixX, nsAdminPixY, nsAdminPixX+1, nsAdminPixY+1, "0xFFFFFF", 10)
     if (isAdmin) {
         NsLog("[4] Admin detected — holding at (" nsAdminSpayX "," nsAdminSpayY ") for 5.1s")
@@ -4154,12 +4897,10 @@ nameAndSpayEpressed() {
     Click("Up")
     NsLog("[4] Released click after 5.1s hold")
 
-    ; ── Step 5: ─────────────────────────────────────────────────────
     Send("{e up}")
     Sleep(200)
     NsLog("[5] Released E — spay complete")
 
-    ; ── Step 6: ─────────────────────────────────────────
     if (nsCryoBtn.Value) {
         Sleep(300)
         Click
@@ -4220,15 +4961,14 @@ QhToggleMode(cb, mode) {
 QhStart(*) {
     global qhMode, qhArmed, qhRunning, MainGui, guiVisible, arkwindow, qhStatusTxt, qhClickDelay
     global cnEnableBtn, nsEnableBtn, runClaimAndNameScript, runNameAndSpayScript, lastDebugContext
-    global depoEggsBtn, depoEmbryoBtn, depoEggsActive, depoEmbryoActive, depoCycle, depoCycleIdx
+    global depoEggsBtn, depoEggsActive, depoCycle, depoCycleIdx
 
-    if (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive || depoEmbryoActive) {
+    if (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive) {
         global qhArmed   := false
         global qhRunning := false
         global runClaimAndNameScript := false
         global runNameAndSpayScript  := false
         global depoEggsActive    := false
-        global depoEmbryoActive  := false
         global depoCycle         := []
         global depoCycleIdx      := 0
         qhStatusTxt.Text := "Disarmed"
@@ -4245,8 +4985,7 @@ QhStart(*) {
     hasCN     := cnEnableBtn.Value
     hasNS     := nsEnableBtn.Value
     hasDepoE  := depoEggsBtn.Value
-    hasDepoEm := depoEmbryoBtn.Value
-    hasDepo   := hasDepoE || hasDepoEm
+    hasDepo   := hasDepoE
 
     if (!hasHatch && !hasCN && !hasNS && !hasDepo) {
         ToolTip(" Select at least one mode!", 0, 0, 1)
@@ -4263,10 +5002,6 @@ QhStart(*) {
     if (hasDepoE) {
         global depoEggsActive := true
         depoCycle.Push({label: "Eggs", filter: "egg"})
-    }
-    if (hasDepoEm) {
-        global depoEmbryoActive := true
-        depoCycle.Push({label: "Embryo", filter: "Embryo"})
     }
 
     if (hasHatch)
@@ -5459,7 +6194,7 @@ MacroShowSaveDialog() {
     }
     macroSaveGui := Gui("+AlwaysOnTop", "Save Macro")
     macroSaveGui.BackColor := "1A1A1A"
-    macroSaveGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    macroSaveGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     macroSaveGui.Add("Text", "x15 y15 w220", "Save Recorded Macro")
     macroSaveGui.SetFont("s9 cDDDDDD", "Segoe UI")
     macroSaveGui.Add("Text", "x15 y42 w55 h24 +0x200", "Name:")
@@ -5564,7 +6299,7 @@ MacroShowRepeatDialog(*) {
     macroRepeatGui.BackColor := "1A1A1A"
     px := 16
     y := 16
-    macroRepeatGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    macroRepeatGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     macroRepeatGui.Add("Text", "x" px " y" y " w250", "Key Repeat")
     mrHelpBtn := DarkBtn(macroRepeatGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
     mrHelpBtn.OnEvent("Click", MacroRepeatShowHelp)
@@ -5616,7 +6351,7 @@ MacroShowRepeatDialog(*) {
     y += 28
     macroRepeatGui.SetFont("s9 cDDDDDD", "Segoe UI")
     global mrPcKeyLbl := macroRepeatGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop key:")
-    macroRepeatGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroRepeatGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     global mrPcKeyVal := macroRepeatGui.Add("Text", "x" (130 + 16) " y" y " w60 h24 +0x200", StrUpper(pcDropKey != "" ? pcDropKey : "?"))
     global mrSaveBtn := DarkBtn(macroRepeatGui, "x" px " y300 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     mrSaveBtn.OnEvent("Click", MacroDoSaveRepeat)
@@ -5669,7 +6404,7 @@ MacroRepeatShowHelp(*) {
     }
     helpGui := Gui("+AlwaysOnTop +ToolWindow", "Key Repeat Help")
     helpGui.BackColor := "1A1A1A"
-    helpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    helpGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     helpGui.Add("Text", "x10 y8 w260", "KEY REPEAT")
     helpGui.SetFont("s8 cDDDDDD", "Segoe UI")
     helpGui.Add("Text", "x10 y30 w260",
@@ -6459,7 +7194,7 @@ MacroShowEditRecorded(idx) {
     titleStr := isPyro ? "Edit Pyro Preset" : "Edit Recorded Macro"
     global macroEditGui := Gui("+AlwaysOnTop", titleStr)
     macroEditGui.BackColor := "1A1A1A"
-    macroEditGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    macroEditGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     macroEditGui.Add("Text", "x15 y15 w220", "Edit: " m.name)
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
     macroEditGui.Add("Text", "x15 y42 w55 h24 +0x200", "Name:")
@@ -6549,7 +7284,7 @@ MacroShowEditRepeat(idx) {
     macroEditGui.BackColor := "1A1A1A"
     px := 16
     y := 16
-    macroEditGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    macroEditGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     macroEditGui.Add("Text", "x" px " y" y " w250", "Edit: " m.name)
     meHelpBtn := DarkBtn(macroEditGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
     meHelpBtn.OnEvent("Click", MacroRepeatShowHelp)
@@ -6612,7 +7347,7 @@ MacroShowEditRepeat(idx) {
     y += 28
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
     global mePcKeyLbl := macroEditGui.Add("Text", "x" (px + 16) " y" y " w100 h24 +0x200", "Drop key:")
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroEditGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     global mePcKeyVal := macroEditGui.Add("Text", "x" (130 + 16) " y" y " w60 h24 +0x200", StrUpper(pcDropKey != "" ? pcDropKey : "?"))
     global meSaveBtn := DarkBtn(macroEditGui, "x" px " y300 w100 h26", "Save", _RED_BGR, _DK_BG, -12, true)
     meSaveBtn.OnEvent("Click", MacroDoEditRepeat.Bind(idx))
@@ -7074,15 +7809,15 @@ MacroShowHelp(*) {
     }
     global macroHelpGui := Gui("+AlwaysOnTop", "Macro Help")
     macroHelpGui.BackColor := "1A1A1A"
-    macroHelpGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    macroHelpGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     macroHelpGui.Add("Text", "x15 y10 w350 Center", "Macro Tab — Help")
-    macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroHelpGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     macroHelpGui.Add("Text", "x15 y38 w350", "CONTROLS")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
     macroHelpGui.Add("Text", "x15 y55 w350", "F3 / Start → arm selected macro")
     macroHelpGui.Add("Text", "x15 y70 w350", StrUpper(pcAccessKey) " → run at inventory  |  Q → cycle / single item")
     macroHelpGui.Add("Text", "x15 y85 w350", "Z → next macro  |  F1 → stop & show UI")
-    macroHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroHelpGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     macroHelpGui.Add("Text", "x15 y108 w350", "COMBO (Popcorn+MagicF)")
     macroHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
     macroHelpGui.Add("Text", "x15 y125 w350", StrUpper(pcAccessKey) " → open inv & drop  |  R → close inv")
@@ -7242,7 +7977,7 @@ GuidedShowSinglePage() {
     }
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x16 y16 w250", "Guided Macro")
     gHelpBtn := DarkBtn(guidedWizGui, "x300 y14 w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
     gHelpBtn.OnEvent("Click", GuidedShowSinglePageHelp)
@@ -7327,7 +8062,7 @@ GuidedShowSinglePage() {
     guidedSpPcHints.Push(guidedWizGui.Add("Text", "x195 y" (fieldY+4) " w120", "(0 = all)"))
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedSpPcLbls.Push(guidedWizGui.Add("Text", "x16 y" (fieldY+28) " w100 h24 +0x200", "Drop key:"))
-    guidedWizGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     dropKeyStr := (pcDropKey != "" ? StrUpper(pcDropKey) : "?")
     global guidedSpDropKeyLbl := guidedWizGui.Add("Text", "x130 y" (fieldY+28) " w60 h24 +0x200", dropKeyStr)
     guidedSpPcLbls.Push(guidedSpDropKeyLbl)
@@ -7478,7 +8213,7 @@ GuidedShowSinglePageHelp(*) {
     }
     hGui := Gui("+AlwaysOnTop +ToolWindow", "Guided Macro Help")
     hGui.BackColor := "1A1A1A"
-    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     hGui.Add("Text", "x10 y8 w280", "GUIDED MACRO")
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
     hGui.Add("Text", "x10 y30 w280",
@@ -7553,7 +8288,7 @@ GuidedShowStep1() {
     }
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Step 1")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w320 Center", "What type of inventory?")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w320", "Select the inventory you will interact with.")
@@ -7583,7 +8318,7 @@ GuidedShowActionStep() {
     global guidedActionType := "take"
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Action Type")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w320 Center", "What should this macro do?")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     if (guidedInvType = "player") {
@@ -7647,7 +8382,7 @@ GuidedShowDropKeyPrompt(nextAction) {
     global guidedWizGui, pcDropKey
     guidedWizGui := Gui("+AlwaysOnTop", "Set Drop Key")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w300 Center", "Confirm Your Drop Key")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w300", "Must match your ARK drop keybind.")
@@ -7689,7 +8424,7 @@ GuidedShowTakeStep() {
     global guidedTakeCount := 3
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Take Setup")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w340 Center", "Take — Transfer items from grid slots")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w340", "Uses the 6x6 inventory grid (same as popcorn).")
@@ -7800,7 +8535,7 @@ GuidedShowGiveStep() {
     global guidedWizGui
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Give Setup")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w340 Center", "Give — Transfer from player inventory")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w340", "Uses the player 6x6 grid (left side inventory).")
@@ -7920,7 +8655,7 @@ GuidedShowPopcornStep() {
     global guidedWizGui, pcDropKey
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Popcorn Setup")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w340 Center", "Popcorn — Drop items from grid slots")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w340", "Uses the 6x6 inventory grid. Hovers each slot")
@@ -8034,7 +8769,7 @@ GuidedShowStep2() {
     global guidedWizGui, guidedFilterCount
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Step 2")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w320 Center", "How many search filters?")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y45 w320", "Your recorded actions will replay once per filter.")
@@ -8079,7 +8814,7 @@ GuidedShowStep3() {
     global guidedFilters := []
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Step 3")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w320 Center", "Enter search filter" (guidedFilterCount > 1 ? "s" : ""))
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     guidedWizGui.Add("Text", "x15 y40 w320", "Type the text for each filter (order = priority).")
@@ -8130,7 +8865,7 @@ GuidedShowStep4() {
     global guidedWizGui, guidedInvType, guidedFilters
     guidedWizGui := Gui("+AlwaysOnTop", "Guided Macro — Step 4")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w340 Center", "Ready to Record")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     invLabel := StrTitle(guidedInvType)
@@ -8389,7 +9124,7 @@ GuidedShowSaveDialog() {
     GuidedCleanRecordedEvents()
     guidedWizGui := Gui("+AlwaysOnTop", "Save Guided Macro")
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     guidedWizGui.Add("Text", "x15 y15 w300", "Save Guided Macro")
     guidedWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     invLabel := StrTitle(guidedInvType)
@@ -9204,7 +9939,7 @@ ComboShowSinglePage() {
     comboWizGui := Gui("+AlwaysOnTop", "Link: Popcorn + Magic F")
     comboWizGui.BackColor := "1A1A1A"
     y := 16
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x16 y" y " w250", "Link: Popcorn + Magic F")
     cHelpBtn := DarkBtn(comboWizGui, "x300 y" (y - 2) " w24 h24", "?", _RED_BGR, _DK_BG, -11, true)
     cHelpBtn.OnEvent("Click", ComboShowSinglePageHelp)
@@ -9249,7 +9984,7 @@ ComboShowSinglePageHelp(*) {
     }
     hGui := Gui("+AlwaysOnTop +ToolWindow", "Combo Help")
     hGui.BackColor := "1A1A1A"
-    hGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    hGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     hGui.Add("Text", "x10 y8 w280", "POPCORN + MAGIC F")
     hGui.SetFont("s8 cDDDDDD", "Segoe UI")
     hGui.Add("Text", "x10 y30 w280",
@@ -9322,7 +10057,7 @@ ComboShowStep1() {
     }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 1")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Popcorn Filters")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     comboWizGui.Add("Text", "x15 y40 w350", "How many items to popcorn? (0 = all, no filter)")
@@ -9356,7 +10091,7 @@ ComboShowStep2(pcCount) {
     global comboWizGui
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 2")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Popcorn Filter Names")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     comboWizGui.Add("Text", "x15 y40 w350", "Type search text for each filter. Blank = all items.")
@@ -9403,7 +10138,7 @@ ComboShowStep3() {
     }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 3")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Magic F Give Filters")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     comboWizGui.Add("Text", "x15 y40 w350", "How many items to Magic F Give? (0 = skip Magic F)")
@@ -9441,7 +10176,7 @@ ComboShowStep4(mfCount) {
     }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 4")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Magic F Give Filter Names")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     comboWizGui.Add("Text", "x15 y40 w350", "Type the search text for each Magic F give filter.")
@@ -9496,7 +10231,7 @@ ComboShowStep5() {
     }
     comboWizGui := Gui("+AlwaysOnTop", "Popcorn+Magic-F — Step 5")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w350 Center", "Take Mode (optional)")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     comboWizGui.Add("Text", "x15 y40 w350", StrUpper(pcAccessKey) " at vault → take N items → close. Set 0 to skip.")
@@ -9544,7 +10279,7 @@ ComboShowSaveDialog() {
     }
     comboWizGui := Gui("+AlwaysOnTop", "Save Popcorn+Magic-F Combo")
     comboWizGui.BackColor := "1A1A1A"
-    comboWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    comboWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     comboWizGui.Add("Text", "x15 y15 w300 Center", "Save Combo Macro")
     comboWizGui.SetFont("s9 cDDDDDD", "Segoe UI")
     pcList := ""
@@ -10052,7 +10787,7 @@ GuidedShowEditDialog(idx) {
     }
     macroEditGui := Gui("+AlwaysOnTop", "Edit Guided Macro")
     macroEditGui.BackColor := "1A1A1A"
-    macroEditGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    macroEditGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     macroEditGui.Add("Text", "x15 y15 w300", "Edit: " m.name)
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
     invLabel := m.HasProp("invType") ? StrTitle(m.invType) : "Storage"
@@ -10224,7 +10959,7 @@ GuidedShowReRecordSetup(idx, mode, slotCount, dropKey, filter) {
         title := mode = "take" ? "Adjust Take — " m.name : "Adjust Popcorn — " m.name
     guidedWizGui := Gui("+AlwaysOnTop", title)
     guidedWizGui.BackColor := "1A1A1A"
-    guidedWizGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    guidedWizGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     if (mode = "give")
         guidedWizGui.Add("Text", "x15 y15 w300 Center", "Adjust Give Slots")
     else
@@ -10472,7 +11207,7 @@ ComboShowEditDialog(idx) {
     }
     macroEditGui := Gui("+AlwaysOnTop", "Edit Combo Macro")
     macroEditGui.BackColor := "1A1A1A"
-    macroEditGui.SetFont("s10 Bold cFF4444", "Segoe UI")
+    macroEditGui.SetFont("s10 Bold c" _themeHexStr, "Segoe UI")
     macroEditGui.Add("Text", "x15 y15 w340 Center", "Edit: " m.name)
     macroEditGui.SetFont("s9 cDDDDDD", "Segoe UI")
     macroEditGui.Add("Text", "x15 y40 w55 h24 +0x200", "Name:")
@@ -10484,7 +11219,7 @@ ComboShowEditDialog(idx) {
     global ceHkEdit := macroEditGui.Add("Edit", "x75 y70 w100 h24 ReadOnly", m.hotkey)
     ceHkDetect := DarkBtn(macroEditGui, "x180 y70 w75 h24", "Detect", _RED_BGR, _DK_BG, -11, true)
     ceHkDetect.OnEvent("Click", (*) => ComboEditDetectHk())
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroEditGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     macroEditGui.Add("Text", "x15 y102 w200", "Popcorn Filters:")
     macroEditGui.SetFont("s9 c000000", "Segoe UI")
     pcStr := ""
@@ -10495,7 +11230,7 @@ ComboShowEditDialog(idx) {
     global cePcEdit := macroEditGui.Add("Edit", "x15 y122 w300 h24", pcStr)
     macroEditGui.SetFont("s8 c888888 Italic", "Segoe UI")
     macroEditGui.Add("Text", "x15 y148 w300", "Separate with |  blank or <all> = no filter")
-    macroEditGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    macroEditGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     macroEditGui.Add("Text", "x15 y168 w200", "Magic F Give Filters:")
     macroEditGui.SetFont("s9 c000000", "Segoe UI")
     mfStr := ""
@@ -10734,60 +11469,86 @@ SimLoadSettings() {
     }
 }
 
+LogWatchScaleScanArea() {
+    global widthmultiplier, heightmultiplier
+    global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH
+    global logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH
+    logWatchScanX := Round(logWatchScanBaseX * widthmultiplier)
+    logWatchScanY := Round(logWatchScanBaseY * heightmultiplier)
+    logWatchScanW := Round(logWatchScanBaseW * widthmultiplier)
+    logWatchScanH := Round(logWatchScanBaseH * heightmultiplier)
+}
+
 LogWatchLoadSettings() {
-    global logWatchWebhook, logWatchPing, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
+    global logWatchWebhook, logWatchPing, logWatchPingRole, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
     global logWatchStagger, logWatchStaggerMult, logWatchHideOverlay, logWatchLockReset, logWatchLockResetMin
+    global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH
+    global logWatchAttachScreenshot, logWatchRejoinEnabled
     configFile := A_ScriptDir "\AIO_config.ini"
     try {
         logWatchWebhook := IniRead(configFile, "LogWatch", "Webhook", "")
         logWatchPing := IniRead(configFile, "LogWatch", "Ping", "")
+        savedPingRole := IniRead(configFile, "LogWatch", "PingRole", "0")
+        logWatchPingRole := (savedPingRole = "1")
         savedHide := IniRead(configFile, "LogWatch", "HideOverlay", "0")
         logWatchHideOverlay := (savedHide = "1")
         savedLockReset := IniRead(configFile, "LogWatch", "LockReset", "0")
         logWatchLockReset := (savedLockReset = "1")
         savedLockResetMin := IniRead(configFile, "LogWatch", "LockResetMin", "1")
         logWatchLockResetMin := Integer(savedLockResetMin)
-        if (logWatchLockResetMin < 1)
-            logWatchLockResetMin := 1
-        savedX := IniRead(configFile, "LogWatch", "ScanX", "")
-        savedY := IniRead(configFile, "LogWatch", "ScanY", "")
-        savedW := IniRead(configFile, "LogWatch", "ScanW", "")
-        savedH := IniRead(configFile, "LogWatch", "ScanH", "")
-        savedThresh := IniRead(configFile, "LogWatch", "Threshold", "3")
-        savedStagger := IniRead(configFile, "LogWatch", "Stagger", "0")
-        savedStaggerMult := IniRead(configFile, "LogWatch", "StaggerMult", "2")
-        if (savedX != "")
-            logWatchScanX := Integer(savedX)
-        if (savedY != "")
-            logWatchScanY := Integer(savedY)
-        if (savedW != "")
-            logWatchScanW := Integer(savedW)
-        if (savedH != "")
-            logWatchScanH := Integer(savedH)
-        logWatchThreshold := Integer(savedThresh)
-        logWatchStagger := (savedStagger = "1")
-        logWatchStaggerMult := Integer(savedStaggerMult)
-        if (logWatchStaggerMult < 2)
-            logWatchStaggerMult := 2
+        savedAttachScreenshot := IniRead(configFile, "LogWatch", "AttachScreenshot", "0")
+        logWatchAttachScreenshot := (savedAttachScreenshot = "1")
+        savedRejoin := IniRead(configFile, "LogWatch", "RejoinOnDisconnect", "1")
+        logWatchRejoinEnabled := (savedRejoin = "1")
     }
+    if (logWatchLockResetMin < 1)
+        logWatchLockResetMin := 1
+    ; Load base scan values (new keys - fall back to defaults for new users or existing users without these keys)
+    savedBaseX := IniRead(configFile, "LogWatch", "ScanBaseX", "")
+    savedBaseY := IniRead(configFile, "LogWatch", "ScanBaseY", "")
+    savedBaseW := IniRead(configFile, "LogWatch", "ScanBaseW", "")
+    savedBaseH := IniRead(configFile, "LogWatch", "ScanBaseH", "")
+    if (savedBaseX != "")
+        logWatchScanBaseX := Integer(savedBaseX)
+    if (savedBaseY != "")
+        logWatchScanBaseY := Integer(savedBaseY)
+    if (savedBaseW != "")
+        logWatchScanBaseW := Integer(savedBaseW)
+    if (savedBaseH != "")
+        logWatchScanBaseH := Integer(savedBaseH)
+    savedThresh := IniRead(configFile, "LogWatch", "Threshold", "3")
+    savedStagger := IniRead(configFile, "LogWatch", "Stagger", "0")
+    savedStaggerMult := IniRead(configFile, "LogWatch", "StaggerMult", "2")
+    logWatchThreshold := Integer(savedThresh)
+    logWatchStagger := (savedStagger = "1")
+    logWatchStaggerMult := Integer(savedStaggerMult)
+    if (logWatchStaggerMult < 2)
+        logWatchStaggerMult := 2
+    ; Compute scaled scan values from base
+    LogWatchScaleScanArea()
 }
 
 LogWatchSaveSettings() {
-    global logWatchWebhook, logWatchPing, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
+    global logWatchWebhook, logWatchPing, logWatchPingRole, logWatchScanX, logWatchScanY, logWatchScanW, logWatchScanH, logWatchThreshold
     global logWatchStagger, logWatchStaggerMult, logWatchHideOverlay, logWatchLockReset, logWatchLockResetMin
+    global logWatchScanBaseX, logWatchScanBaseY, logWatchScanBaseW, logWatchScanBaseH
+    global logWatchAttachScreenshot, logWatchRejoinEnabled
     configFile := A_ScriptDir "\AIO_config.ini"
     IniWrite(logWatchWebhook, configFile, "LogWatch", "Webhook")
     IniWrite(logWatchPing, configFile, "LogWatch", "Ping")
-    IniWrite(logWatchScanX, configFile, "LogWatch", "ScanX")
-    IniWrite(logWatchScanY, configFile, "LogWatch", "ScanY")
-    IniWrite(logWatchScanW, configFile, "LogWatch", "ScanW")
-    IniWrite(logWatchScanH, configFile, "LogWatch", "ScanH")
+    IniWrite(logWatchPingRole ? "1" : "0", configFile, "LogWatch", "PingRole")
+    IniWrite(logWatchScanBaseX, configFile, "LogWatch", "ScanBaseX")
+    IniWrite(logWatchScanBaseY, configFile, "LogWatch", "ScanBaseY")
+    IniWrite(logWatchScanBaseW, configFile, "LogWatch", "ScanBaseW")
+    IniWrite(logWatchScanBaseH, configFile, "LogWatch", "ScanBaseH")
     IniWrite(logWatchThreshold, configFile, "LogWatch", "Threshold")
     IniWrite(logWatchStagger ? "1" : "0", configFile, "LogWatch", "Stagger")
     IniWrite(logWatchStaggerMult, configFile, "LogWatch", "StaggerMult")
     IniWrite(logWatchHideOverlay ? "1" : "0", configFile, "LogWatch", "HideOverlay")
     IniWrite(logWatchLockReset ? "1" : "0", configFile, "LogWatch", "LockReset")
     IniWrite(logWatchLockResetMin, configFile, "LogWatch", "LockResetMin")
+    IniWrite(logWatchAttachScreenshot ? "1" : "0", configFile, "LogWatch", "AttachScreenshot")
+    IniWrite(logWatchRejoinEnabled ? "1" : "0", configFile, "LogWatch", "RejoinOnDisconnect")
 }
 
 CheckState() {
@@ -11689,13 +12450,13 @@ SheepShowAutoLvlGui() {
     sheepAutoLvlGui := Gui("+AlwaysOnTop -Caption +E0x08000000", "SheepAutoLvL")
     sheepAutoLvlGui.BackColor := "1A1A1A"
 
-    sheepAutoLvlGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
+    sheepAutoLvlGui.SetFont("s10 c" _themeHexStr " Bold", "Segoe UI")
     sheepAutoLvlGui.Add("Text", "x8 y8 w120", "Auto LvL Running")
 
     sheepAutoLvlGui.SetFont("s9 c00FF00", "Segoe UI")
     sheepAutoLvlGui.Add("Text", "x8 y+6 w120", "Press " StrUpper(sheepLevelActionKey))
 
-    sheepAutoLvlGui.SetFont("s8 cFF4444 Italic", "Segoe UI")
+    sheepAutoLvlGui.SetFont("s8 c" _themeHexStr " Italic", "Segoe UI")
     sheepAutoLvlGui.Add("Text", "x8 y+5 w140", sheepAutoLvlKey " = Toggle")
 
     sheepAutoLvlGui.SetFont("s8 c888888", "Segoe UI")
@@ -11736,7 +12497,7 @@ SheepShowStatusGui() {
     sheepStatusGui := Gui("+AlwaysOnTop -Caption +E0x08000000", "SheepStatus")
     sheepStatusGui.BackColor := "1A1A1A"
 
-    sheepStatusGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
+    sheepStatusGui.SetFont("s10 c" _themeHexStr " Bold", "Segoe UI")
     sheepStatusGui.Add("Text", "x8 y8 w210", "🐑 SheepV2 Running")
 
     sheepStatusGui.SetFont("s9 c00FF00", "Segoe UI")
@@ -12941,7 +13702,7 @@ SvrEditNote(*) {
     }
     svrNoteGui := Gui("+AlwaysOnTop +Owner", "Server Note")
     svrNoteGui.BackColor := "1A1A1A"
-    svrNoteGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    svrNoteGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     svrNoteGui.Add("Text", "x20 y15 w230", "Note for server " num)
     svrNoteGui.SetFont("s9 c000000", "Segoe UI")
     noteEdit := svrNoteGui.Add("Edit", "x20 y40 w230 h24", svrList[found].note)
@@ -15211,7 +15972,7 @@ PcShowStorageOverlay() {
     }
     sizeGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20")
     sizeGui.BackColor := "1A1A1A"
-    sizeGui.SetFont("s8 cFF4444", "Segoe UI")
+    sizeGui.SetFont("s8 c" _themeHexStr, "Segoe UI")
     sizeGui.Add("Text", "x2 y0 w200", "(" x "," y ") " w "x" h)
     sizeGui.Show("x" x " y" (y - 18) " NoActivate")
     guis.Push(sizeGui)
@@ -16077,7 +16838,7 @@ PcShowSetKeysPrompt() {
     promptGui.BackColor := "1A1A1A"
     promptGui.SetFont("s10 cDDDDDD", "Segoe UI")
     promptGui.Add("Text", "x20 y20 w300 h20 Center", "Set your keys before continuing")
-    promptGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    promptGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     btnOK := promptGui.Add("Button", "x20 y58 w150 h28", "Set Keys Now")
     promptGui.SetFont("s9 c888888", "Segoe UI")
     btnLater := promptGui.Add("Button", "x180 y58 w140 h28", "Do It Later")
@@ -16100,7 +16861,7 @@ PcShowSetKeysForm() {
     formGui.Add("Text", "x20 y20 w120 h22 +0x200", "Access key:")
     formGui.SetFont("s9 c000000", "Segoe UI")
     accessEdit := formGui.Add("Edit", "x148 y20 w60 h22 Center", pcAccessKey)
-    formGui.SetFont("s9 cFF4444", "Segoe UI")
+    formGui.SetFont("s9 c" _themeHexStr, "Segoe UI")
     btnDetectAccess := formGui.Add("Button", "x218 y20 w90 h22", "Set")
     formGui.SetFont("s8 c666666 Italic", "Segoe UI")
     formGui.Add("Text", "x20 y44 w288 h16", "(open dino/storage inventory — default F)")
@@ -16109,7 +16870,7 @@ PcShowSetKeysForm() {
     formGui.Add("Text", "x20 y66 w120 h22 +0x200", "Inventory key:")
     formGui.SetFont("s9 c000000", "Segoe UI")
     invEdit := formGui.Add("Edit", "x148 y66 w60 h22 Center", pcInvKey)
-    formGui.SetFont("s9 cFF4444", "Segoe UI")
+    formGui.SetFont("s9 c" _themeHexStr, "Segoe UI")
     btnDetectInv := formGui.Add("Button", "x218 y66 w90 h22", "Set")
     formGui.SetFont("s8 c666666 Italic", "Segoe UI")
     formGui.Add("Text", "x20 y90 w288 h16", "(your inventory — will save for sheep mode)")
@@ -16118,7 +16879,7 @@ PcShowSetKeysForm() {
     formGui.Add("Text", "x20 y112 w120 h22 +0x200", "Drop key:")
     formGui.SetFont("s9 c000000", "Segoe UI")
     dropEdit := formGui.Add("Edit", "x148 y112 w60 h22 Center", pcDropKey)
-    formGui.SetFont("s9 cFF4444", "Segoe UI")
+    formGui.SetFont("s9 c" _themeHexStr, "Segoe UI")
     btnDetectDrop := formGui.Add("Button", "x218 y112 w90 h22", "Set")
     formGui.SetFont("s8 c666666 Italic", "Segoe UI")
     formGui.Add("Text", "x20 y136 w288 h16", "(what you popcorn with)")
@@ -16126,7 +16887,7 @@ PcShowSetKeysForm() {
     formGui.SetFont("s9 cDDDDDD", "Segoe UI")
     formGui.Add("Text", "x20 y160 w288 h16 Center", "Click Set then press a key to bind")
 
-    formGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    formGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     btnSave   := formGui.Add("Button", "x20  y186 w140 h28", "Save")
     formGui.SetFont("s9 c888888", "Segoe UI")
     btnCancel := formGui.Add("Button", "x168 y186 w140 h28", "Cancel")
@@ -17405,20 +18166,20 @@ AcShowGridHelp(*) {
     acHelpGui := Gui("+AlwaysOnTop +Owner", "Craft Help")
     acHelpGui.BackColor := "1A1A1A"
 
-    acHelpGui.SetFont("s10 cFF4444 Bold", "Segoe UI")
+    acHelpGui.SetFont("s10 c" _themeHexStr " Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y15 w315", "Quick Guide")
 
-    acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    acHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y40 w315", "Simple Craft")
     acHelpGui.SetFont("s9 cFFFFFF", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+2 w315", "Pick preset or type filter → START → " StrUpper(pcAccessKey) " on inventory")
 
-    acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    acHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+10 w315", "Inventory Timed")
     acHelpGui.SetFont("s9 cFFFFFF", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+2 w315", "Same as Simple but crafts on a timer with countdown")
 
-    acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    acHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+10 w315", "Grid Walk")
     acHelpGui.SetFont("s9 cFFFFFF", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+2 w315",
@@ -17429,7 +18190,7 @@ AcShowGridHelp(*) {
         . "Use ladder to lock your camera`n"
         . "Default setings to run Megalabs at rivercrafting ↑↓ 1 row, ←→ 11 inventories, walk ↑↓ 0, ←→ 850")
 
-    acHelpGui.SetFont("s9 cFF4444 Bold", "Segoe UI")
+    acHelpGui.SetFont("s9 c" _themeHexStr " Bold", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+10 w315", "Take-All")
     acHelpGui.SetFont("s9 cFFFFFF", "Segoe UI")
     acHelpGui.Add("Text", "x15 y+2 w315", "Transfers matching items from their inv before each craft")
@@ -17627,7 +18388,6 @@ $F1:: {
         global qhArmed               := false
         global qhRunning             := false
         global depoEggsActive        := false
-        global depoEmbryoActive      := false
         global depoCycle              := []
         global depoCycleIdx           := 0
         ImprintStopAll()
@@ -17713,7 +18473,7 @@ PcRegisterInvHotkey() {
 _PcInvHotkeyHandler(thisHotkey) {
     if (!WinActive(arkwindow))
         return
-    _miscActive := (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive || depoEmbryoActive)
+    _miscActive := (qhArmed || runClaimAndNameScript || runNameAndSpayScript || depoEggsActive)
     if (!_miscActive && macroHotkeysLive && macroArmed && macroSelectedIdx >= 1 && macroSelectedIdx <= macroList.Length) {
         sel := macroList[macroSelectedIdx]
         if (sel.hotkey = pcAccessKey && sel.type != "guided" && sel.type != "combo") {
@@ -17801,6 +18561,7 @@ _PcInvHotkeyHandler(thisHotkey) {
         global lastDebugContext := "nameandspay"
         nameAndSpayEpressed()
     } else if (runClaimAndNameScript) {
+        global lastDebugContext := "nameandspay"
         claimAndNameEpressed()
     }
     if (!(A_PriorHotkey = A_ThisHotkey && A_TimeSincePriorHotkey < 300))
@@ -18092,7 +18853,7 @@ PcHotkeyBracketRight(thisHotkey) {
         return
     }
 
-    if (depoEggsActive || depoEmbryoActive) {
+    if (depoEggsActive) {
         if (depoCycle.Length > 1) {
             global depoCycleIdx := Mod(depoCycleIdx, depoCycle.Length) + 1
             ToolTip(DepoBuildTooltip(), 0, 0, 1)
@@ -18284,6 +19045,15 @@ F11:: {
                 out .= " " v "`n"
         } else
             out .= "(no sim log entries)`n"
+        global lwLog, logWatchRunning, logWatchRejoinInProgress, logWatchRejoinPhase, logWatchInGameConsecutive
+        out .= "`n=== LOG WATCH ===`n"
+        out .= "running=" logWatchRunning "  rejoinInProgress=" logWatchRejoinInProgress "  phase='" logWatchRejoinPhase "'  inGameConsec=" logWatchInGameConsecutive "`n"
+        if (IsSet(lwLog) && lwLog.Length > 0) {
+            out .= "=== LOG WATCH LOG ===`n"
+            for i, v in lwLog
+                out .= " " v "`n"
+        } else
+            out .= "(no log watch log entries)`n"
     }
 
     else if (ctx = "craft" || acRunning || acTimedArmed || acGridArmed || acSimpleArmed || acCountOnlyActive) {
@@ -18556,6 +19326,15 @@ F11:: {
     out .= _DebugPxCheck("lvlInvOpen", Round(1632*widthmultiplier), Round(215*heightmultiplier), 0xFFFFFF)
 
     out .= "`n--- Name/Spay ---`n"
+    nameDlgX := Integer(1034*widthmultiplier)
+    nameDlgY := Integer(665*heightmultiplier)
+    out .= _DebugPxCheck("nameDialog", nameDlgX, nameDlgY, 0x94D2EA, 30)
+    out .= _DebugPx("nameDlg-5x",  nameDlgX-5, nameDlgY)
+    out .= _DebugPx("nameDlg+5x",  nameDlgX+5, nameDlgY)
+    out .= _DebugPx("nameDlg-5y",  nameDlgX,   nameDlgY-5)
+    out .= _DebugPx("nameDlg+5y",  nameDlgX,   nameDlgY+5)
+    out .= _DebugPx("nameField",   Integer(1241*widthmultiplier), Integer(664*heightmultiplier))
+    out .= _DebugPx("nameConfirm", Integer(1122*widthmultiplier), Integer(1014*heightmultiplier))
     out .= _DebugPxCheck("radial", nsRadialX, nsRadialY, 0xFFFFFF)
     out .= _DebugPxCheck("altRadial", nsAltRadialX, nsAltRadialY, 0xFFFFFF)
     out .= _DebugPxCheck("alt2Radial", nsAlt2RadialX, nsAlt2RadialY, 0xFFFFFF)
@@ -19008,7 +19787,7 @@ ImprintShowHelp(*) {
     }
     imprintHelpGui := Gui("+AlwaysOnTop +ToolWindow", "Auto Imprint Help")
     imprintHelpGui.BackColor := "1A1A1A"
-    imprintHelpGui.SetFont("s9 Bold cFF4444", "Segoe UI")
+    imprintHelpGui.SetFont("s9 Bold c" _themeHexStr, "Segoe UI")
     imprintHelpGui.Add("Text", "x10 y8 w280", "AUTO IMPRINT — HOW TO USE")
     imprintHelpGui.SetFont("s8 cDDDDDD", "Segoe UI")
     imprintHelpGui.Add("Text", "x10 y30 w280",

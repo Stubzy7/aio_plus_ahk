@@ -2,6 +2,13 @@
 
 ---
 
+Added 7 color themes
+Log bot sims back to the last joined server on disconnect, opens the tribe log, and highlights online players
+Added option to send a tribe log screenshot to Discord on ping
+Improved OCR regex. Without a screenshot, sends a filtered text log with only relevant events
+
+---
+
 Fixed Log Watch re-triggering too fast when lock reset was enabled
 Log Watch Discord now uses <@id> ping format and relative timestamps
 Log Watch shows preset name in Discord message instead of raw detection words
