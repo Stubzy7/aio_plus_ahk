@@ -731,6 +731,63 @@ global pyroDismountY    := Round(1177 * heightmultiplier)
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 CoordMode("ToolTip", "Screen")
+
+; ── Custom dark tooltip system ────────────────────────────────────────────────
+global _aioTipGuis := Map()
+
+AioTipMeasure(text, maxW) {
+    hdc := DllCall("GetDC", "Ptr", 0, "Ptr")
+    hFont := DllCall("gdi32\CreateFont", "Int", -12, "Int", 0, "Int", 0, "Int", 0
+                    , "Int", 400, "UInt", 0, "UInt", 0, "UInt", 0
+                    , "UInt", 1, "UInt", 0, "UInt", 0, "UInt", 4, "UInt", 0
+                    , "Str", "Segoe UI", "Ptr")
+    oldFont := DllCall("gdi32\SelectObject", "Ptr", hdc, "Ptr", hFont, "Ptr")
+    rect := Buffer(16, 0)
+    NumPut("Int", maxW, rect, 8)
+    DT_CALCRECT := 0x400, DT_WORDBREAK := 0x10, DT_EXPANDTABS := 0x40, DT_NOPREFIX := 0x800
+    DllCall("user32\DrawTextW", "Ptr", hdc, "Str", text, "Int", -1
+          , "Ptr", rect, "UInt", DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX)
+    w := NumGet(rect, 8, "Int")
+    h := NumGet(rect, 12, "Int")
+    DllCall("gdi32\SelectObject", "Ptr", hdc, "Ptr", oldFont, "Ptr")
+    DllCall("gdi32\DeleteObject", "Ptr", hFont)
+    DllCall("ReleaseDC", "Ptr", 0, "Ptr", hdc)
+    return { w: w, h: h }
+}
+
+AioTip(text, x := 0, y := 0, slot := 1) {
+    global _aioTipGuis, _tipBgHex, _tipFgHex
+    m := AioTipMeasure(text, 600)
+    w := m.w + 2
+    h := m.h + 2
+    if (_aioTipGuis.Has(slot)) {
+        try _aioTipGuis[slot].Destroy()
+        _aioTipGuis.Delete(slot)
+    }
+    g := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x08000080")
+    g.BackColor := _tipBgHex
+    g.MarginX := 8, g.MarginY := 6
+    g.SetFont("s9", "Segoe UI")
+    g.Add("Text", "w" w " h" h " c" _tipFgHex, text)
+    g.Show("x" x " y" y " NoActivate")
+    _aioTipGuis[slot] := g
+}
+
+AioTipOff(slot := 0) {
+    global _aioTipGuis
+    if (slot = 0) {
+        for k, g in _aioTipGuis
+            try g.Destroy()
+        _aioTipGuis.Clear()
+        return
+    }
+    if (_aioTipGuis.Has(slot)) {
+        try _aioTipGuis[slot].Destroy()
+        _aioTipGuis.Delete(slot)
+    }
+}
+
+; ── End custom tooltip system ─────────────────────────────────────────────────
 global GameWindow := "ArkAscended"
 global GameHeight := 0
 global GameWidth  := 0
@@ -921,13 +978,13 @@ DarkBtnText(btn, newText) {
 }
 
 global _themes := Map(
-    "Ares",    Map("hex", 0xDC143C, "name", "Ares"),
-    "Helios",  Map("hex", 0xFF6200, "name", "Helios"),
-    "Hermes",  Map("hex", 0xFFD700, "name", "Hermes"),
-    "Neptune", Map("hex", 0x00FFE4, "name", "Neptune"),
-    "Slate",   Map("hex", 0x4169E1, "name", "Slate"),
-    "Shade",   Map("hex", 0x7F00FF, "name", "Shade"),
-    "Mono",    Map("hex", 0xAAAAAA, "name", "Mono"),
+    "Ares",    Map("hex", 0xDC143C, "name", "Ares",    "bg_dark", 0x1A0A0E, "fg", 0xF5E6E8, "fg_dim", 0xAA7068),
+    "Helios",  Map("hex", 0xFF6200, "name", "Helios",  "bg_dark", 0x161616, "fg", 0xF0F0F0, "fg_dim", 0x888888),
+    "Hermes",  Map("hex", 0xFFD700, "name", "Hermes",  "bg_dark", 0x1A1608, "fg", 0xFFF8DC, "fg_dim", 0xB8860B),
+    "Neptune", Map("hex", 0x00FFE4, "name", "Neptune", "bg_dark", 0x0A1C2C, "fg", 0xE0F7F4, "fg_dim", 0x7ACCC4),
+    "Slate",   Map("hex", 0x4169E1, "name", "Slate",   "bg_dark", 0x101830, "fg", 0xD0D8F0, "fg_dim", 0x7888AA),
+    "Shade",   Map("hex", 0x7F00FF, "name", "Shade",   "bg_dark", 0x10081C, "fg", 0xE8E0F5, "fg_dim", 0x7F70A0),
+    "Mono",    Map("hex", 0xAAAAAA, "name", "Mono",    "bg_dark", 0x141414, "fg", 0xDDDDDD, "fg_dim", 0x888888),
 )
 
 ThemeLoadName() {
@@ -991,6 +1048,22 @@ ThemeDimRgb() {
 global _RED_DIM_BGR := ThemeRgbToBgr(ThemeDimRgb())
 global _GRAY_BGR := 0xDDDDDD
 global _DK_BG    := 0x1A1A1A
+
+ThemeBgDark() {
+    global _themeName, _themes
+    return _themes[_themeName]["bg_dark"]
+}
+ThemeFg() {
+    global _themeName, _themes
+    return _themes[_themeName]["fg"]
+}
+ThemeFgDim() {
+    global _themeName, _themes
+    return _themes[_themeName]["fg_dim"]
+}
+global _tipBgHex    := Format("{:06X}", ThemeBgDark())
+global _tipFgHex    := Format("{:06X}", ThemeFg())
+global _hintFgHex   := Format("{:06X}", ThemeFgDim())
 
 ModeSelectTab := MainGui.Add("Tab2","x-3 y0 w460 h440 Background000000",["JoinSim","Magic F","AutoLvL","Popcorn","Sheep","Craft","Macro","Misc"])
 ModeSelectTab.SetFont("s9 cFFFFFF Bold", "Segoe UI")
@@ -1104,9 +1177,9 @@ _GGDrawItem(wParam, lParam, msg, hwnd) {
 
 ModeSelectTab.UseTab()
 ResText := MainGui.Add("Text","x10 y416 w140","Resolution: " ScreenWidth "x" ScreenHeight)
-ResText.SetFont("s8 c888888","Segoe UI")
-MainGui.Add("Text","x140 y416 w100 Center","Ctrl+Tab = tabs").SetFont("s8 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x240 y416 w80 Center","F4 = Exit").SetFont("s8 c888888 Italic","Segoe UI")
+ResText.SetFont("s8 c" _hintFgHex,"Segoe UI")
+MainGui.Add("Text","x140 y416 w100 Center","Ctrl+Tab = tabs").SetFont("s8 c" _hintFgHex " Italic","Segoe UI")
+MainGui.Add("Text","x240 y416 w80 Center","F4 = Exit").SetFont("s8 c" _hintFgHex " Italic","Segoe UI")
 global ApplicationSelect := MainGui.Add("Text","x320 y416 w120 Right","")
 ApplicationSelect.Text := arkwindow
 ApplicationSelect.SetFont("s8 c888888","Segoe UI")
@@ -1321,29 +1394,29 @@ testntfy.OnEvent("Click", (*) => ntfypush("low","Test Button"))
 ntfyHelp  := DarkBtn(MainGui, "x287 y226 w22 h20", "?", _RED_BGR, _DK_BG, -11, true)
 ntfyHelp.OnEvent("Click", ShowNtfyHelp)
 
-MainGui.Add("Text","x25 y248 w280"," F1 — Show / Hide UI").SetFont("s9 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x25 y262 w110"," F2 — Overcap").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y248 w280"," F1 — Show / Hide UI").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
+MainGui.Add("Text","x25 y262 w110"," F2 — Overcap").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global overcapDediEdit := MainGui.Add("Edit","x135 y260 w18 h16 +Number","3")
 overcapDediEdit.SetFont("s7 c000000","Segoe UI")
 overcapDediEdit.OnEvent("Change", OvercapDediEditChanged)
 global overcapCountdown := MainGui.Add("Text","x157 y262 w170","")
 overcapCountdown.SetFont("s8 c00FF00","Segoe UI")
-MainGui.Add("Text","x25 y276 w300"," F3 — Quick Feed  (Raw → Berry → Off)").SetFont("s9 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x25 y290 w300"," F5 — Apply INI  (paste custom in Misc)").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y276 w300"," F3 — Quick Feed  (Raw → Berry → Off)").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
+MainGui.Add("Text","x25 y290 w300"," F5 — Apply INI  (paste custom in Misc)").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global obF6Label := MainGui.Add("Text","x25 y304 w165"," F6 — Fill OB  (" StrUpper(pcAccessKey) " to upload)")
-obF6Label.SetFont("s9 c888888 Italic","Segoe UI")
+obF6Label.SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global obStatusText := MainGui.Add("Text","x190 y304 w250","")
 obStatusText.SetFont("s8 c00FF00","Segoe UI")
-MainGui.Add("Text","x25 y318 w165"," F7 — Empty OB  (F7 at trans)").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y318 w165"," F7 — Empty OB  (F7 at trans)").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global obDownText := MainGui.Add("Text","x190 y318 w55","")
 obDownText.SetFont("s8 c00FF00","Segoe UI")
-MainGui.Add("Text","x25 y332 w185"," F8 — BG Mammoth Drums").SetFont("s9 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x25 y346 w185"," F9 — BG Autoclick").SetFont("s9 c888888 Italic","Segoe UI")
-MainGui.Add("Text","x25 y360 w160"," F10 — Quick Popcorn").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y332 w185"," F8 — BG Mammoth Drums").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
+MainGui.Add("Text","x25 y346 w185"," F9 — BG Autoclick").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
+MainGui.Add("Text","x25 y360 w160"," F10 — Quick Popcorn").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global pcF10StatusTxt := MainGui.Add("Text","x150 y360 w60","")
 pcF10StatusTxt.SetFont("s8 c00FF00","Segoe UI")
 global pcF10SpeedTxt := MainGui.Add("Text","x5 y0 w0 h0","")
-MainGui.Add("Text","x25 y374 w160"," F12 — Grab My Kit").SetFont("s9 c888888 Italic","Segoe UI")
+MainGui.Add("Text","x25 y374 w160"," F12 — Grab My Kit").SetFont("s9 c" _hintFgHex " Italic","Segoe UI")
 global gmkStatusTxt := MainGui.Add("Text","x150 y374 w60","")
 gmkStatusTxt.SetFont("s8 c00FF00","Segoe UI")
 
@@ -1576,7 +1649,7 @@ MagicFToggleRefill(*) {
             global runMagicFScript := false
             global magicFPresetIdx := 1
             SafeDisableZ()
-            ToolTip()
+            AioTipOff()
         }
     }
 }
@@ -2409,15 +2482,15 @@ OnTabChange(ctrl, *) {
     global pcTabActive, pcF10Step
     global runAutoLvlScript, gmkMode
     if (!macroPlaying) {
-        ToolTip()
-        ToolTip(,,,1)
-        ToolTip(,,,2)
+        AioTipOff()
+        AioTipOff(1)
+        AioTipOff(2)
     }
     if (ctrl.Value != 3 && runAutoLvlScript) {
         global runAutoLvlScript := false
         DarkBtnText(StartAutoLvlButton, "START")
         if (!macroPlaying)
-            ToolTip()
+            AioTipOff()
     }
     if (ctrl.Value = 5) {
         global sheepTabActive := true
@@ -2465,10 +2538,10 @@ OnTabChange(ctrl, *) {
             PcRegisterSpeedHotkeys(false)
             PcUpdateUI()
             if (!macroPlaying)
-                ToolTip()
+                AioTipOff()
         }
         if (pcF10Step > 0 && !macroPlaying)
-            ToolTip()
+            AioTipOff()
     }
     if (ctrl.Value = 2) {
     } else {
@@ -2477,7 +2550,7 @@ OnTabChange(ctrl, *) {
             global magicFPresetIdx := 1
             SafeDisableZ()
             if (!macroPlaying)
-                ToolTip()
+                AioTipOff()
         }
     }
     if (ctrl.Value = 6) {
@@ -2501,7 +2574,7 @@ OnTabChange(ctrl, *) {
         try imprintStatusTxt.Text := "Press Start then R=read Q=auto"
     }
     if (gmkMode != "off")
-        ToolTip(GmkBuildTooltip(), 0, 0)
+        AioTip(GmkBuildTooltip())
     if (ctrl.Value = 7) {
         global macroTabActive := true
         MacroRegisterHotkeys(true)
@@ -2584,8 +2657,8 @@ ApplyIni() {
     Sleep(500)
     A_Clipboard := _savedClip
 
-    ToolTip(" INI Applied!  |  F1 = Show UI  |  Q = Stop", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" INI Applied!  |  F1 = Show UI  |  Q = Stop")
+    SetTimer(() => AioTipOff(), -3000)
 }
 
 IniDetectCommandKey(*) {
@@ -2596,9 +2669,9 @@ IniDetectCommandKey(*) {
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
     ih.Start()
-    ToolTip("Press your command bar key...")
+    AioTip("Press your command bar key...")
     ih.Wait()
-    ToolTip()
+    AioTipOff()
     if (ih.EndReason = "EndKey") {
         key := ih.EndKey
         if (RegExMatch(key, "^F\d+$") || StrLen(key) = 1)
@@ -2606,8 +2679,8 @@ IniDetectCommandKey(*) {
         else
             iniCmdKeyEdit.Value := "{" key "}"
     } else if (ih.EndReason = "Timeout") {
-        ToolTip("Timed out")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Timed out")
+        SetTimer(() => AioTipOff(),-1500)
     }
 }
 
@@ -2615,14 +2688,14 @@ IniSaveCommandKey(*) {
     global iniCommandKey, iniCmdKeyEdit
     val := Trim(iniCmdKeyEdit.Value)
     if (val = "") {
-        ToolTip("Command key cannot be empty!")
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Command key cannot be empty!")
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     global iniCommandKey := val
     IniWrite(val, A_ScriptDir "\AIO_config.ini", "ini", "commandkey")
-    ToolTip("INI command key saved: " val)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip("INI command key saved: " val)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 IniSaveCustomCommand(*) {
@@ -2630,8 +2703,8 @@ IniSaveCustomCommand(*) {
     val := Trim(iniCustomEdit.Value)
     global iniCustomCommand := val
     IniWrite(val != "" ? val : " ", A_ScriptDir "\AIO_config.ini", "ini", "customcommand")
-    ToolTip(val != "" ? "Custom INI saved!" : "Custom INI cleared — using default.")
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(val != "" ? "Custom INI saved!" : "Custom INI cleared — using default.")
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 ReconnectDetectKey(*) {
@@ -2642,15 +2715,15 @@ ReconnectDetectKey(*) {
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
     ih.Start()
-    ToolTip("Press your reconnect hotkey...")
+    AioTip("Press your reconnect hotkey...")
     ih.Wait()
-    ToolTip()
+    AioTipOff()
     if (ih.EndReason = "EndKey") {
         key := ih.EndKey
         reconKeyEdit.Value := key
     } else if (ih.EndReason = "Timeout") {
-        ToolTip("Timed out")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Timed out")
+        SetTimer(() => AioTipOff(),-1500)
     }
 }
 
@@ -2658,8 +2731,8 @@ ReconnectSaveKey(*) {
     global reconnectKey, reconKeyEdit
     val := Trim(reconKeyEdit.Value)
     if (val = "") {
-        ToolTip("Reconnect key cannot be empty!")
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Reconnect key cannot be empty!")
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     oldKey := reconnectKey
@@ -2669,8 +2742,8 @@ ReconnectSaveKey(*) {
         try Hotkey(oldKey, "Off")
     }
     try Hotkey(val, ReconnectHandler, "On")
-    ToolTip("Reconnect key saved: " val)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip("Reconnect key saved: " val)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 ReconnectHandler(*) {
@@ -2876,13 +2949,13 @@ LwToggleResize(*) {
     global logWatchResizing, lwScanBtn
     global acOcrResizing, imprintResizing
     if (acOcrResizing) {
-        ToolTip(" Exit Craft OCR resize first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Exit Craft OCR resize first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     if (IsSet(imprintResizing) && imprintResizing) {
-        ToolTip(" Exit Imprint resize first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Exit Imprint resize first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     if (logWatchResizing) {
@@ -2891,7 +2964,7 @@ LwToggleResize(*) {
     }
     logWatchResizing := true
     DarkBtnText(lwScanBtn, "Done")
-    ToolTip("Log Watch OCR: WASD=move  Arrows=resize  Enter=done  Esc=cancel", 0, 0)
+    AioTip("Log Watch OCR: WASD=move  Arrows=resize  Enter=done  Esc=cancel", 0, 0)
     LwShowScanOverlay()
     try Hotkey("$Up",    LwResizeUp,    "On")
     try Hotkey("$Down",  LwResizeDown,  "On")
@@ -2952,8 +3025,8 @@ LwResetScanAreaDefault(*) {
         LwHideScanOverlay()
         LwShowScanOverlay()
     }
-    ToolTip("Default scan area applied", 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip("Default scan area applied", 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 LwLockResetChanged(*) {
@@ -3081,17 +3154,17 @@ global lwStatusTooltipMsg := ""
 
 LwShowStatusTooltip(msg) {
     global lwStatusTooltipMsg := msg
-    ToolTip(msg, 0, 0, 19)
+    AioTip(msg, 0, 0, 19)
 }
 
 LwUpdateStatusTooltip(msg) {
     global lwStatusTooltipMsg := msg
-    ToolTip(msg, 0, 0, 19)
+    AioTip(msg, 0, 0, 19)
 }
 
 LwHideStatusTooltip() {
     global lwStatusTooltipMsg := ""
-    ToolTip(,,,19)
+    AioTipOff(19)
 }
 
 LwSelectScanArea(*) {
@@ -3110,7 +3183,7 @@ LwSelectScanArea(*) {
     try logWatchWizard.Hide()
 
     Sleep(200)
-    ToolTip("Click and drag to select scan area...", 0, 0)
+    AioTip("Click and drag to select scan area...", 0, 0)
 
     KeyWait("LButton", "D")
     MouseGetPos(&startX, &startY)
@@ -3120,7 +3193,7 @@ LwSelectScanArea(*) {
     }
 
     MouseGetPos(&endX, &endY)
-    ToolTip()
+    AioTipOff()
 
     if (Abs(endX - startX) > 10 && Abs(endY - startY) > 10) {
         logWatchScanX := Min(startX, endX)
@@ -3139,8 +3212,8 @@ LwSelectScanArea(*) {
         LogWatchSaveSettings()
     } else {
         try logWatchWizard.Show()
-        ToolTip("Area too small", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Area too small", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
     }
 }
 
@@ -3171,8 +3244,8 @@ LwStartWatch(*) {
         if (savedInvGate = "")
             savedInvGate := IniRead(A_ScriptDir "\AIO_config.ini", "Sheep", "InventoryKey", "")
         if (savedInvGate = "") {
-            ToolTip("Set your keys first (needed for auto-rejoin)", 0, 0)
-            SetTimer(() => ToolTip(), -2500)
+            AioTip("Set your keys first (needed for auto-rejoin)", 0, 0)
+            SetTimer(() => AioTipOff(),-2500)
             try PcShowSetKeysForm()
             return
         }
@@ -3195,8 +3268,8 @@ LwStartWatch(*) {
 
     wordsStr := Trim(lwWordsEdit.Value)
     if (wordsStr = "") {
-        ToolTip("Enter words to watch for", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Enter words to watch for", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -3208,8 +3281,8 @@ LwStartWatch(*) {
     }
 
     if (logWatchWords.Length = 0) {
-        ToolTip("Enter at least one word", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Enter at least one word", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -3280,8 +3353,8 @@ LwStopWatch() {
     SetTimer(LwRejoinSettle, 0)
     DarkBtnText(logWatchStartBtn, "Start")
     LwHideStatusTooltip()
-    ToolTip("Log Watch stopped", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip("Log Watch stopped", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 LwScanLoop() {
@@ -3397,8 +3470,8 @@ LwTestDiscord(*) {
     global lwWebhookEdit, lwPingEdit, lwTestBtn
     webhook := Trim(lwWebhookEdit.Value)
     if (webhook = "") {
-        ToolTip("Enter Discord webhook URL first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Enter Discord webhook URL first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     ping := Trim(lwPingEdit.Value)
@@ -3430,8 +3503,8 @@ LwTestDiscord(*) {
         DarkBtnText(lwTestBtn, "Sent!")
         SetTimer(() => DarkBtnText(lwTestBtn, "Test"), -2000)
     } catch {
-        ToolTip("Failed to send test", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Failed to send test", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
     }
 }
 
@@ -3784,8 +3857,8 @@ LwStopRejoin(reason) {
     logWatchEnabled := false
     SetTimer(LwScanLoop, 0)
     try LwSendDiscord("Log Watch stopped: " . reason)
-    ToolTip("Log Watch stopped: " . reason, 0, 0)
-    SetTimer(() => ToolTip(), -4000)
+    AioTip("Log Watch stopped: " . reason, 0, 0)
+    SetTimer(() => AioTipOff(),-4000)
 }
 
 FilterARKLog(rawText) {
@@ -4108,9 +4181,9 @@ NsShowHelp(*) {
 }
 
 TempTooltip(text, x, y, timeinmillis) {
-    ToolTip(text, x, y)
+    AioTip(text, x, y)
     Sleep(timeinmillis)
-    ToolTip
+    AioTipOff()
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4269,7 +4342,7 @@ RunMagicF(*) {
     MainGui.Hide
     global guiVisible := false
     try Hotkey("$z", MagicFSwapDirection, "On")
-    ToolTip(MagicFBuildTooltip(), 0, 0)
+    AioTip(MagicFBuildTooltip())
 }
 
 MagicFBuildTooltip() {
@@ -4371,7 +4444,7 @@ MagicFSwapDirection(thisHotkey) {
     tText := CustomEditTake.Text
     CustomEditGive.Text := tText
     CustomEditTake.Text := gText
-    ToolTip(MagicFBuildTooltip(), 0, 0)
+    AioTip(MagicFBuildTooltip())
 }
 magicFpressed() {
     global magicFPresetNames, magicFPresetFilters, magicFPresetDirs, magicFPresetIdx
@@ -4411,7 +4484,7 @@ magicFpressed() {
         }
         Send("{Esc}")
         Sleep(mfTransferSettleMs)
-        ToolTip(MagicFBuildTooltip(), 0, 0)
+        AioTip(MagicFBuildTooltip())
         return
     }
 
@@ -4436,7 +4509,7 @@ magicFpressed() {
 
     Send("{Esc}")
     Sleep(mfTransferSettleMs)
-    ToolTip(MagicFBuildTooltip(), 0, 0)
+    AioTip(MagicFBuildTooltip())
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4477,9 +4550,9 @@ QuickFeedCycle(*) {
         global guiVisible := false
         if WinExist(arkwindow)
             WinActivate(arkwindow)
-        ToolTip(" Quick Feed — Raw Meat armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Berry  |  F3 again = Off", 0, 0)
+        AioTip(" Quick Feed — Raw Meat armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Berry  |  F3 again = Off")
     } else if (quickFeedMode = 2) {
-        ToolTip(" Quick Feed — Berry armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Off", 0, 0)
+        AioTip(" Quick Feed — Berry armed`n" StrUpper(pcAccessKey) " at dino to feed  |  F3 = Off")
     } else {
         QuickFeedStop()
     }
@@ -4488,7 +4561,7 @@ QuickFeedCycle(*) {
 QuickFeedStop() {
     global quickFeedMode, MainGui, guiVisible
     global quickFeedMode := 0
-    ToolTip()
+    AioTipOff()
     OBCharRestoreTooltip()
     global guiVisible := false
 }
@@ -4521,7 +4594,7 @@ QuickFeedFPressed() {
 
     modeStr := (quickFeedMode = 1) ? "Raw Meat" : "Berry"
     nextStr := (quickFeedMode = 1) ? "F3 = Berry" : "F3 = Off"
-    ToolTip(" Quick Feed — " modeStr " armed`n" StrUpper(pcAccessKey) " at dino to feed  |  " nextStr, 0, 0)
+    AioTip(" Quick Feed — " modeStr " armed`n" StrUpper(pcAccessKey) " at dino to feed  |  " nextStr)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4532,7 +4605,7 @@ RunAutoLvl(*) {
     if (runAutoLvlScript) {
         global runAutoLvlScript := false
         DarkBtnText(StartAutoLvlButton, "START")
-        ToolTip()
+        AioTipOff()
         return
     }
     
@@ -4554,8 +4627,8 @@ RunAutoLvl(*) {
     }
     
     if (activeStats.Length = 0 && !AutoSaddleCheckBox.Value) {
-        ToolTip(" No stats set — enter point values first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" No stats set — enter point values first")
+        SetTimer(() => AioTipOff(), -2000)
         return
     }
 
@@ -4591,7 +4664,7 @@ AutoLvlShowTooltip() {
     cycleInfo := autoLvlCycleSlots.Length > 1
         ? " (" autoLvlCycleIdx "/" autoLvlCycleSlots.Length ")  Q=next"
         : ""
-    ToolTip(" AutoLvL: " slotInfo cycleInfo "`nF1 = Stop", 0, 20)
+    AioTip(" AutoLvL: " slotInfo cycleInfo "`nF1 = Stop", 0, 20)
 }
 
 global autoLvlHealthPixX  := Round(1075 * widthmultiplier)
@@ -4974,8 +5047,8 @@ QhStart(*) {
         qhStatusTxt.Text := "Disarmed"
         qhAllBtn.Value    := 0
         qhSingleBtn.Value := 0
-        ToolTip(,,,1)
-        ToolTip(,,,2)
+        AioTipOff(1)
+        AioTipOff(2)
         MainGui.Show("NoActivate")
         global guiVisible := true
         return
@@ -4988,8 +5061,8 @@ QhStart(*) {
     hasDepo   := hasDepoE
 
     if (!hasHatch && !hasCN && !hasNS && !hasDepo) {
-        ToolTip(" Select at least one mode!", 0, 0, 1)
-        SetTimer(() => ToolTip(,,,1), -1500)
+        AioTip(" Select at least one mode!", 0, 0, 1)
+        SetTimer(() => AioTipOff(1), -1500)
         return
     }
 
@@ -5009,14 +5082,14 @@ QhStart(*) {
 
     if (hasDepo) {
         global depoCycleIdx := 1
-        ToolTip(DepoBuildTooltip(), 0, 0, 1)
+        AioTip(DepoBuildTooltip(), 0, 0, 1)
     }
 
     if (hasHatch) {
         global qhArmed := true
         if (!hasDepo) {
             modeNames := Map(1, "All", 2, "Single")
-            ToolTip(" Quick Hatch — " modeNames[qhMode] "`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
+            AioTip(" Quick Hatch — " modeNames[qhMode] "`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
         }
     }
 
@@ -5026,7 +5099,7 @@ QhStart(*) {
         global lastDebugContext      := "nameandspay"
         if (!hasDepo) {
             nsY := hasHatch ? 40 : 0
-            ToolTip(" Claim/Name`nPress E to Claim/Name  |  F1 = Pause  |  Q = Stop ", 0, nsY, 2)
+            AioTip(" Claim/Name`nPress E to Claim/Name  |  F1 = Pause  |  Q = Stop ", 0, nsY, 2)
         }
     } else if (hasNS) {
         global runNameAndSpayScript  := true
@@ -5034,7 +5107,7 @@ QhStart(*) {
         global lastDebugContext      := "nameandspay"
         if (!hasDepo) {
             nsY := hasHatch ? 40 : 0
-            ToolTip(" Name/Spay`nPress E to Name/Spay  |  F1 = Pause  |  Q = Stop ", 0, nsY, 2)
+            AioTip(" Name/Spay`nPress E to Name/Spay  |  F1 = Pause  |  Q = Stop ", 0, nsY, 2)
         }
     }
 }
@@ -5217,8 +5290,8 @@ QhFPressed() {
 
             if (eggCount = 0) {
                 QhLog("Single mode — no eggs in inventory")
-                ToolTip(" No eggs detected", 0, 0, 1)
-                SetTimer(() => ToolTip(,,,1), -1500)
+                AioTip(" No eggs detected", 0, 0, 1)
+                SetTimer(() => AioTipOff(1), -1500)
             } else {
                 MouseMove(qhClick1X, qhClick1Y)
                 Sleep(qhClickDelay)
@@ -5239,9 +5312,9 @@ QhFPressed() {
                 }
                 QhLog("Single mode — pre: " eggCount "  post: " remaining "  polls: " pollCount)
                 if (remaining > 0)
-                    ToolTip(" Single — " remaining " egg" (remaining > 1 ? "s" : "") " remaining`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
+                    AioTip(" Single — " remaining " egg" (remaining > 1 ? "s" : "") " remaining`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
                 else
-                    ToolTip(" Single — inventory empty`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
+                    AioTip(" Single — inventory empty`nPress " StrUpper(pcAccessKey) " at inventory  |  Q = Stop", 0, 0, 1)
             }
         }
         Sleep(100)
@@ -5279,7 +5352,7 @@ ToggleMammothScript(*) {
 
 StartMammothScript() {
     global runMammothScript := true
-    ToolTip(" BG Mammoth Drums RUNNING`nF8 = Stop", 0, 0)
+    AioTip(" BG Mammoth Drums RUNNING`nF8 = Stop")
     if WinExist(arkWindow)
         WinActivate(arkWindow)
     SetControlDelay(-1)
@@ -5290,7 +5363,7 @@ StartMammothScript() {
 StopMammothScript() {
     global runMammothScript := false
     SetTimer(MammothDrumTick, 0)
-    ToolTip()
+    AioTipOff()
     OBCharRestoreTooltip()
 }
 
@@ -5492,11 +5565,11 @@ GmkToggle() {
             MainGui.Hide()
             global guiVisible := false
         }
-        ToolTip(GmkBuildTooltip(), 0, 0)
+        AioTip(GmkBuildTooltip())
     } else {
         gmkStatusTxt.Text := ""
-        ToolTip(" Grab My Kit: Off", 0, 0)
-        SetTimer(() => (gmkMode != "off" ? 0 : (ToolTip(), OBCharRestoreTooltip())), -1500)
+        AioTip(" Grab My Kit: Off")
+        SetTimer(() => (gmkMode != "off" ? 0 : (AioTipOff(), OBCharRestoreTooltip())), -1500)
     }
 }
 
@@ -5541,7 +5614,7 @@ GmkFPressed() {
     Sleep(100)
     busy := false
     if (gmkMode != "off")
-        ToolTip(GmkBuildTooltip(), 0, 0)
+        AioTip(GmkBuildTooltip())
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -5992,8 +6065,8 @@ MacroStartRecord(*) {
     if (macroRecording || macroPlaying)
         return
     if (macroList.Length >= 10) {
-        ToolTip(" Max 10 macros — delete one first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Max 10 macros — delete one first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     macroRecordEvents := []
@@ -6008,7 +6081,7 @@ MacroStartRecord(*) {
     global macroRecordLastTick := A_TickCount
     MacroRecordSetHotkeys(true)
     SetTimer(MacroRecordMousePoll, 50)
-    ToolTip(" RECORDING...  (0 events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" RECORDING...  (0 events)`n F1 = Stop & Save")
 }
 
 MacroStopRecord() {
@@ -6018,10 +6091,10 @@ MacroStopRecord() {
     global macroRecording := false
     MacroRecordSetHotkeys(false)
     SetTimer(MacroRecordMousePoll, 0)
-    ToolTip()
+    AioTipOff()
     if (macroRecordEvents.Length = 0) {
-        ToolTip(" Recording empty — discarded", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Recording empty — discarded", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return true
     }
     MacroShowSaveDialog()
@@ -6076,7 +6149,7 @@ MacroRecordLogKey(thisHotkey) {
     evt.key := k
     evt.delay := delay
     macroRecordEvents.Push(evt)
-    ToolTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save")
     Critical("Off")
 }
 
@@ -6092,7 +6165,7 @@ MacroRecordLogControl(key) {
     evt.key := k
     evt.delay := delay
     macroRecordEvents.Push(evt)
-    ToolTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save")
     Critical("Off")
     KeyWait(key)
     Critical()
@@ -6105,7 +6178,7 @@ MacroRecordLogControl(key) {
     evt2.key := k
     evt2.delay := delay2
     macroRecordEvents.Push(evt2)
-    ToolTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save")
 }
 
 MacroRecordLogMouse(key) {
@@ -6161,7 +6234,7 @@ MacroRecordLogMouse(key) {
         evt2.delay := delay2
         macroRecordEvents.Push(evt2)
     }
-    ToolTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" RECORDING...  (" macroRecordEvents.Length " events)`n F1 = Stop & Save")
 }
 
 MacroRecordMousePoll() {
@@ -6260,8 +6333,8 @@ MacroDoSaveRecorded(*) {
     name := Trim(macroNameEdit.Value)
     hk := Trim(macroHkEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m := {}
@@ -6280,15 +6353,15 @@ MacroDoSaveRecorded(*) {
     global macroSaveGui := ""
     global macroRecordEvents := []
     MacroRegisterHotkeys(macroTabActive)
-    ToolTip(" Macro '" name "' saved! (" m.events.Length " events)", 0, 0)
-    SetTimer(() => ToolTip(), -2500)
+    AioTip(" Macro '" name "' saved! (" m.events.Length " events)", 0, 0)
+    SetTimer(() => AioTipOff(),-2500)
 }
 
 MacroShowRepeatDialog(*) {
     global macroRepeatGui, macroList
     if (macroList.Length >= 10) {
-        ToolTip(" Max 10 macros — delete one first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Max 10 macros — delete one first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     try {
@@ -6519,8 +6592,8 @@ MacroDoSaveRepeat(*) {
     global mrNameEdit, mrKeyList, mrIntervalEdit, mrBindEdit, mrPcCheck, mrPcDropEdit
     name := Trim(mrNameEdit.Value)
     if (name = "" || mrKeyList.Length = 0) {
-        ToolTip("Name and at least one key required!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Name and at least one key required!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m := {}
@@ -6557,8 +6630,8 @@ MacroRepeatFinalizeSave(m) {
     keyStr := ""
     for i, k in m.repeatKeys
         keyStr .= (i > 1 ? ", " : "") k
-    ToolTip(" Key Repeat '" m.name "' saved! [" keyStr "]", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(" Key Repeat '" m.name "' saved! [" keyStr "]", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 MacroPlaySelected(*) {
@@ -6567,8 +6640,8 @@ MacroPlaySelected(*) {
     if (macroPlaying)
         return
     if (macroSelectedIdx < 1 || macroSelectedIdx > macroList.Length) {
-        ToolTip(" Select a macro first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Select a macro first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     global macroArmed := true
@@ -6590,7 +6663,7 @@ MacroPlaySelected(*) {
         pcHint := (sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0) ? "`n F = popcorn" : ""
         if (pcHint != "")
             MacroArmPopcornF(macroSelectedIdx)
-        ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) pcHint "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm", 0, 0)
+        AioTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) pcHint "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm")
     }
 }
 
@@ -6634,19 +6707,19 @@ MacroPlayRecordedThread(m) {
         loopCount++
         loopStr := m.loopEnabled ? "  (loop " loopCount ")" : ""
         macroTT := " Playing: " m.name loopStr "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop"
-        ToolTip(macroTT, 0, 0)
+        AioTip(macroTT)
         for , evt in m.events {
             if (!macroPlaying) {
-                ToolTip()
+                AioTipOff()
                 return
             }
             scaledDelay := Integer(evt.delay * m.speedMult)
             if (scaledDelay > 0) {
                 Sleep(scaledDelay)
-                ToolTip(macroTT, 0, 0)
+                AioTip(macroTT)
             }
             if (!macroPlaying) {
-                ToolTip()
+                AioTipOff()
                 return
             }
             switch evt.type {
@@ -6688,7 +6761,7 @@ MacroPlayRecordedThread(m) {
         global macroPlaying := false
         global macroActiveIdx := 0
         MacroSaveIfDirty()
-        ToolTip(" " m.name " done`n" MacroSpeedHint(m) "`n " StrUpper(m.hotkey) " = run again  |  Z = next macro  |  F1 = disarm", 0, 0)
+        AioTip(" " m.name " done`n" MacroSpeedHint(m) "`n " StrUpper(m.hotkey) " = run again  |  Z = next macro  |  F1 = disarm")
     }
 }
 
@@ -6730,7 +6803,7 @@ MacroPlayRepeatThread(m) {
                 remaining := bgInterval
                 while (remaining > 0 && macroPlaying) {
                     secs := Format("{:.1f}", remaining / 1000)
-                    ToolTip(" BG Left Click: " m.name " in " secs "s`n Z = next macro  |  F1 = Stop", 0, 0)
+                    AioTip(" BG Left Click: " m.name " in " secs "s`n Z = next macro  |  F1 = Stop")
                     step := Min(remaining, 100)
                     Sleep(step)
                     remaining -= step
@@ -6754,7 +6827,7 @@ MacroPlayRepeatThread(m) {
             MacroSaveIfDirty()
         }
         if (!macroArmed) {
-            ToolTip()
+            AioTipOff()
             if (!guiVisible) {
                 MainGui.Show("NoActivate")
                 global guiVisible := true
@@ -6804,7 +6877,7 @@ MacroPlayRepeatThread(m) {
                 secs := Format("{:.1f}", remaining / 1000)
                 moveHint := ""
                 qHint := keys.Length > 1 ? "`n Q = next key" : ""
-                ToolTip(" " m.name ": " curKey " in " secs "s" moveHint qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
+                AioTip(" " m.name ": " curKey " in " secs "s" moveHint qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop")
                 step := Min(remaining, 100)
                 Sleep(step)
                 remaining -= step
@@ -6837,7 +6910,7 @@ MacroPlayRepeatThread(m) {
         global macroActiveIdx := 0
         MacroSaveIfDirty()
     }
-    ToolTip()
+    AioTipOff()
 }
 
 MacroRepeatBuildTooltip(m, curKey) {
@@ -6849,12 +6922,12 @@ MacroRepeatBuildTooltip(m, curKey) {
         arrow := (i = macroRepeatKeyIdx) ? " ► " : "   "
         keyList .= "`n" arrow k
     }
-    ToolTip(" Hold: " curKey keyList qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop", 0, 0)
+    AioTip(" Hold: " curKey keyList qHint "`n" MacroSpeedHint(m) "`n Z = next macro  |  F1 = Stop")
 }
 
 MacroBgClickTooltip(m, intervalMs, isSpam) {
     mode := isSpam ? "Hold" : "Interval: " intervalMs "ms"
-    ToolTip(" BG Left Click: " m.name "  (" mode ")`n Z = next macro  |  F1 = Stop", 0, 0)
+    AioTip(" BG Left Click: " m.name "  (" mode ")`n Z = next macro  |  F1 = Stop")
 }
 
 MacroBgClickSlower(thisHotkey) {
@@ -6890,7 +6963,7 @@ MacroPopcornFThread(m) {
         if (sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0)
             MacroArmPopcornF(macroSelectedIdx)
         keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
-        ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n F = popcorn`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
+        AioTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n F = popcorn`n Tap to run  |  Z = next  |  F1 = disarm")
     }
 }
 
@@ -6979,10 +7052,10 @@ MacroPlayPyroThread(m) {
     }
     if (isDismountR || isDismountG) {
         MacroLog("Pyro: dismount detected — spamming Ctrl+C")
-        ToolTip(" Pyro: Dismounting...`n Spamming Ctrl+C`n F1 = Stop", 0, 0)
+        AioTip(" Pyro: Dismounting...`n Spamming Ctrl+C`n F1 = Stop")
         loop 200 {
             if (!macroPlaying || macroActiveIdx != myIdx) {
-                ToolTip()
+                AioTipOff()
                 return
             }
             if !WinActive(arkwindow)
@@ -6996,7 +7069,7 @@ MacroPlayPyroThread(m) {
                 rc := (checkCol >> 16) & 0xFF, gc := (checkCol >> 8) & 0xFF, bc := checkCol & 0xFF
                 if ((Abs(rc - 0xD4) + Abs(gc - 0x5F) + Abs(bc - 0x12)) >= 40) {
                     MacroLog("Pyro: dismount cleared — back on shoulder")
-                    ToolTip(" Pyro: Back on shoulder!`n R = mount  |  F1 = disarm", 0, 0)
+                    AioTip(" Pyro: Back on shoulder!`n R = mount  |  F1 = disarm")
                     break
                 }
             }
@@ -7009,12 +7082,12 @@ MacroPlayPyroThread(m) {
         return
     }
     MacroLog("Pyro: mounting — holding R for radial")
-    ToolTip(" Pyro: Mounting...`n Holding R for radial`n F1 = Stop", 0, 0)
+    AioTip(" Pyro: Mounting...`n Holding R for radial`n F1 = Stop")
     Send("{r Down}")
     Sleep(Integer(450 * sp))
     if (!macroPlaying || macroActiveIdx != myIdx) {
         Send("{r Up}")
-        ToolTip()
+        AioTipOff()
         return
     }
     firstClickX := 0
@@ -7048,7 +7121,7 @@ MacroPlayPyroThread(m) {
     }
     if (contextName = "") {
         MacroLog("Pyro: no context detected — all pixels failed white check (tol=40)")
-        ToolTip(" Pyro: No context detected — aborting`n R = retry  |  F1 = disarm", 0, 0)
+        AioTip(" Pyro: No context detected — aborting`n R = retry  |  F1 = disarm")
         Send("{r Up}")
         if (macroActiveIdx = myIdx) {
             global macroPlaying := false
@@ -7058,14 +7131,14 @@ MacroPlayPyroThread(m) {
         return
     }
     MacroLog("Pyro: context='" contextName "' — clicking (" firstClickX "," firstClickY ")")
-    ToolTip(" Pyro: " contextName " detected`n Clicking first option...`n F1 = Stop", 0, 0)
+    AioTip(" Pyro: " contextName " detected`n Clicking first option...`n F1 = Stop")
     MouseMove(firstClickX, firstClickY, 0)
     Sleep(Integer(50 * sp))
     Click("Left")
     Sleep(Integer(150 * sp))
     if (!macroPlaying || macroActiveIdx != myIdx) {
         Send("{r Up}")
-        ToolTip()
+        AioTipOff()
         return
     }
     try throwCol := PxGet(pyroThrowCheckX, pyroThrowCheckY)
@@ -7074,7 +7147,7 @@ MacroPlayPyroThread(m) {
     MacroLog("Pyro: throwCheck (" pyroThrowCheckX "," pyroThrowCheckY ")=" (throwCol != "" ? _PyroColStr(throwCol) : "ERR"))
     if (throwCol != "" && _PyroNearWhite(throwCol)) {
         MacroLog("Pyro: THROW detected — aborting")
-        ToolTip(" Pyro: THROW detected (enclosed space)`n Aborting — need more room!`n R = retry  |  F1 = disarm", 0, 0)
+        AioTip(" Pyro: THROW detected (enclosed space)`n Aborting — need more room!`n R = retry  |  F1 = disarm")
         Send("{r Up}")
         Sleep(500)
         if (macroActiveIdx = myIdx) {
@@ -7090,7 +7163,7 @@ MacroPlayPyroThread(m) {
     MacroLog("Pyro: rideConfirm (" pyroRideConfirmX "," pyroRideConfirmY ")=" (rideCol != "" ? _PyroColStr(rideCol) : "ERR"))
     if (rideCol != "" && _PyroNearWhite(rideCol)) {
         MacroLog("Pyro: ride confirmed — mounting")
-        ToolTip(" Pyro: Ride confirmed! Mounting...`n F1 = Stop", 0, 0)
+        AioTip(" Pyro: Ride confirmed! Mounting...`n F1 = Stop")
     }
     MouseMove(pyroMountClickX, pyroMountClickY, 0)
     Sleep(Integer(50 * sp))
@@ -7098,7 +7171,7 @@ MacroPlayPyroThread(m) {
     Sleep(Integer(100 * sp))
     Send("{r Up}")
     MacroLog("Pyro: mount sequence complete")
-    ToolTip(" Pyro: Mounted!`n R = dismount  |  F1 = disarm", 0, 0)
+    AioTip(" Pyro: Mounted!`n R = dismount  |  F1 = disarm")
     if (macroActiveIdx = myIdx) {
         global macroPlaying := false
         global macroActiveIdx := 0
@@ -7130,7 +7203,7 @@ MacroStopPlay() {
         if (macroList[wasIdx].type = "pyro")
             Send("{r Up}")
     }
-    ToolTip()
+    AioTipOff()
     MacroSaveIfDirty()
 }
 
@@ -7141,8 +7214,8 @@ MacroDeleteSelected(*) {
     row := macroSelectedIdx
     m := macroList[row]
     if (m.type = "pyro") {
-        ToolTip(" Can't delete built-in presets", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Can't delete built-in presets", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     name := m.name
@@ -7165,8 +7238,8 @@ MacroEditSelected(*) {
     if (macroPlaying)
         return
     if (macroSelectedIdx < 1 || macroSelectedIdx > macroList.Length) {
-        ToolTip(" Select a macro first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Select a macro first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     row := macroSelectedIdx
@@ -7252,8 +7325,8 @@ MacroDoEditRecorded(idx, *) {
     m := macroList[idx]
     name := Trim(meNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     MacroRegisterHotkeys(false)
@@ -7269,8 +7342,8 @@ MacroDoEditRecorded(idx, *) {
     MacroRegisterHotkeys(macroTabActive)
     try macroEditGui.Destroy()
     global macroEditGui := ""
-    ToolTip(" '" name "' updated", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(" '" name "' updated", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 MacroShowEditRepeat(idx) {
@@ -7453,8 +7526,8 @@ MacroDoEditRepeat(idx, *) {
     global meNameEdit, meKeyList, meIntervalEdit, meBindEdit, mePcCheck, mePcDropEdit
     name := Trim(meNameEdit.Value)
     if (name = "" || meKeyList.Length = 0) {
-        ToolTip("Name and at least one key required!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Name and at least one key required!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     MacroRegisterHotkeys(false)
@@ -7483,8 +7556,8 @@ MacroDoEditRepeat(idx, *) {
     MacroRegisterHotkeys(macroTabActive)
     try macroEditGui.Destroy()
     global macroEditGui := ""
-    ToolTip(" '" name "' updated", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(" '" name "' updated", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 MacroEditCancel(*) {
@@ -7551,7 +7624,7 @@ MacroZCycle(*) {
     sel := macroList[macroSelectedIdx]
     keyStr := sel.hotkey != "" ? " [" StrUpper(sel.hotkey) "]" : ""
     MacroLog("ZCycle: → #" macroSelectedIdx " '" sel.name "' type=" sel.type)
-    ToolTip(" ► " sel.name keyStr "`n Press hotkey to run  |  Z = next  |  F1 = Stop", 0, 0)
+    AioTip(" ► " sel.name keyStr "`n Press hotkey to run  |  Z = next  |  F1 = Stop")
 }
 
 MacroTuneSelected(*) {
@@ -7560,15 +7633,15 @@ MacroTuneSelected(*) {
     if (macroPlaying)
         return
     if (macroSelectedIdx < 1 || macroSelectedIdx > macroList.Length) {
-        ToolTip(" Select a recorded macro first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Select a recorded macro first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     row := macroSelectedIdx
     m := macroList[row]
     if (m.type != "recorded" && m.type != "guided") {
-        ToolTip(" Tuning works on recorded/guided macros", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Tuning works on recorded/guided macros", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     global macroTuning := true
@@ -7589,7 +7662,7 @@ MacroTuneLoop(idx) {
     settle := isGuided && m.HasProp("mouseSettle") ? m.mouseSettle : 5
     while (macroTuning && iteration < 10) {
         iteration++
-        ToolTip(" TUNING: " m.name "`n Speed: " Format("{:.2f}x", tuneCurrent) "  (run " iteration ")`n Playing...", 0, 0)
+        AioTip(" TUNING: " m.name "`n Speed: " Format("{:.2f}x", tuneCurrent) "  (run " iteration ")`n Playing...", 0, 0)
         if WinExist(arkwindow)
             WinActivate(arkwindow)
         Sleep(500)
@@ -7599,7 +7672,7 @@ MacroTuneLoop(idx) {
             if (!macroTuning || !macroPlaying) {
                 global macroPlaying := false
                 global macroTuning := false
-                ToolTip()
+                AioTipOff()
                 return
             }
             scaledDelay := Integer(evt.delay * tuneCurrent)
@@ -7614,7 +7687,7 @@ MacroTuneLoop(idx) {
             if (!macroTuning || !macroPlaying) {
                 global macroPlaying := false
                 global macroTuning := false
-                ToolTip()
+                AioTipOff()
                 return
             }
             switch evt.type {
@@ -7650,16 +7723,16 @@ MacroTuneLoop(idx) {
         }
         global macroPlaying := false
         if (!macroTuning) {
-            ToolTip()
+            AioTipOff()
             return
         }
-        ToolTip(" TUNING: " m.name "  at " Format("{:.2f}x", tuneCurrent) "`n Did it work?`n Y = Pass  |  N = Fail  |  F1 = Done", 0, 0)
+        AioTip(" TUNING: " m.name "  at " Format("{:.2f}x", tuneCurrent) "`n Did it work?`n Y = Pass  |  N = Fail  |  F1 = Done", 0, 0)
         ih := InputHook("L1 T60")
         ih.KeyOpt("{All}", "E")
         ih.Start()
         ih.Wait()
         if (!macroTuning) {
-            ToolTip()
+            AioTipOff()
             return
         }
         key := ih.EndKey
@@ -7680,8 +7753,8 @@ MacroTuneLoop(idx) {
     MacroSaveAll()
     MacroUpdateListView()
     global macroTuning := false
-    ToolTip(" Tuning done: " m.name " = " Format("{:.2f}x", tuneHigh), 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Tuning done: " m.name " = " Format("{:.2f}x", tuneHigh), 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 MacroRegisterHotkeys(enable) {
@@ -7755,8 +7828,8 @@ MacroSpeedDown(*) {
     if (!macroPlaying)
         MacroUpdateListView()
     bar := MacroSpeedBar(m.speedMult)
-    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  SLOWER`n " bar, 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  SLOWER`n " bar, 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 MacroSpeedUp(*) {
@@ -7777,8 +7850,8 @@ MacroSpeedUp(*) {
     if (!macroPlaying)
         MacroUpdateListView()
     bar := MacroSpeedBar(m.speedMult)
-    ToolTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  FASTER`n " bar, 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" ► " m.name "  " Format("{:.2f}x", m.speedMult) "  FASTER`n " bar, 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 MacroSpeedBar(sp) {
@@ -7889,13 +7962,13 @@ MacroHotkeyHandler(idx, thisHotkey) {
             _pcH := (sel.type = "repeat" && sel.HasProp("popcornFilters") && sel.popcornFilters.Length > 0) ? "`n F = popcorn" : ""
             if (_pcH != "")
                 MacroArmPopcornF(idx)
-            ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) _pcH "`n Tap to run  |  Z = next  |  F1 = disarm", 0, 0)
+            AioTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) _pcH "`n Tap to run  |  Z = next  |  F1 = disarm")
         }
         return
     }
     if (MacroIsBusy()) {
-        ToolTip(" Macro paused — another function is running`n Will resume when done", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Macro paused — another function is running`n Will resume when done", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     if (guiVisible) {
@@ -7918,8 +7991,8 @@ MacroHotkeyHandler(idx, thisHotkey) {
             MacroLog("HotkeyHandler: launching combo thread immediately from GUI arm")
             MacroPlayByIndex(idx)
         } else {
-            ToolTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm", 0, 0)
-            SetTimer(() => ToolTip(), -3000)
+            AioTip(" ► " sel.name " armed" keyStr "`n" MacroSpeedHint(sel) "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm")
+            SetTimer(() => AioTipOff(), -3000)
         }
         return
     }
@@ -7961,8 +8034,8 @@ GuidedStartWizard(*) {
     if (macroPlaying || macroRecording || guidedRecording)
         return
     if (macroList.Length >= 10) {
-        ToolTip(" Max 10 macros — delete one first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Max 10 macros — delete one first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     MacroBlockAllHotkeys()
@@ -8404,8 +8477,8 @@ GuidedDropKeyConfirm(nextAction, *) {
     global guidedWizGui, guidedDropKeyEdit, pcDropKey
     newKey := Trim(guidedDropKeyEdit.Value)
     if (newKey = "") {
-        ToolTip("Enter a drop key!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a drop key!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     global pcDropKey := newKey
@@ -8460,8 +8533,8 @@ GuidedTakeSave(*) {
 
     name := Trim(guidedTakeNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     slotCount := Integer(guidedTakeEdit.Value)
@@ -8527,8 +8600,8 @@ GuidedTakeSave(*) {
     MacroRegisterHotkeys(macroTabActive)
     modeLabel := (guidedTransferMode = "single") ? "single" : "stacks"
     MacroLog("GuidedTakeSave: '" name "' — " slotCount " " modeLabel ", key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
-    ToolTip(" Take macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Take macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 GuidedShowGiveStep() {
@@ -8574,8 +8647,8 @@ GuidedGiveSave(*) {
 
     name := Trim(guidedGiveNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     slotCount := Integer(guidedGiveEdit.Value)
@@ -8647,8 +8720,8 @@ GuidedGiveSave(*) {
     MacroRegisterHotkeys(macroTabActive)
     modeLabel := (guidedTransferMode = "single") ? "single" : "stacks"
     MacroLog("GuidedGiveSave: '" name "' — " slotCount " " modeLabel ", key=" transferKey " filter=" (filter = "" ? "(none)" : filter) " skipFirst=" skipFirst " events=" events.Length)
-    ToolTip(" Give macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Give macro '" name "' saved! (" slotCount " " modeLabel ", " events.Length " events)", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 GuidedShowPopcornStep() {
@@ -8696,8 +8769,8 @@ GuidedPopcornSave(*) {
 
     name := Trim(guidedPcNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     rawCount := Integer(guidedPcSlotsEdit.Value)
@@ -8761,8 +8834,8 @@ GuidedPopcornSave(*) {
     global guidedWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
     MacroLog("GuidedPopcornSave: '" name "' — " rawCount " slots, dropKey=" dropKey " filter=" (filter = "" ? "(none)" : filter) " events=" events.Length)
-    ToolTip(" Popcorn macro '" name "' saved! (" rawCount " slots, " events.Length " events)", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Popcorn macro '" name "' saved! (" rawCount " slots, " events.Length " events)", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 GuidedShowStep2() {
@@ -8852,8 +8925,8 @@ GuidedStep3Next(*) {
             guidedFilters.Push(val)
     }
     if (guidedFilters.Length = 0) {
-        ToolTip("Enter at least one filter or go back and set 0")
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Enter at least one filter or go back and set 0")
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     guidedWizGui.Destroy()
@@ -8934,7 +9007,7 @@ GuidedBeginRecord(*) {
 GuidedRecordTooltip() {
     global guidedRecordEvents, guidedReRecordIdx
     mode := guidedReRecordIdx > 0 ? "RE-RECORDING" : "GUIDED RECORDING"
-    ToolTip(" " mode "...  (" guidedRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
+    AioTip(" " mode "...  (" guidedRecordEvents.Length " events)`n F1 = Stop & Save", 0, 0)
 }
 
 GuidedRecordSetHotkeys(enable) {
@@ -9102,13 +9175,13 @@ GuidedStopRecord() {
     global guidedRecording := false
     GuidedRecordSetHotkeys(false)
     SetTimer(GuidedRecordMousePoll, 0)
-    ToolTip()
+    AioTipOff()
     MacroLog("GuidedRecord: STOPPED  events=" guidedRecordEvents.Length)
     MacroRegisterHotkeys(macroTabActive)
     if (guidedRecordEvents.Length = 0) {
         MacroLog("GuidedRecord: empty — discarded")
-        ToolTip(" Recording empty — discarded", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Recording empty — discarded", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return true
     }
     GuidedShowSaveDialog()
@@ -9269,8 +9342,8 @@ GuidedDoSave(*) {
     global macroList, macroTabActive, macroSelectedIdx
     name := Trim(guidedNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m := {}
@@ -9300,8 +9373,8 @@ GuidedDoSave(*) {
     global guidedRecordEvents := []
     MacroRegisterHotkeys(macroTabActive)
     MacroLog("GuidedSave: '" name "' saved — " m.events.Length " events, " m.searchFilters.Length " filters, hk=" m.hotkey)
-    ToolTip(" Guided macro '" name "' saved! (" m.events.Length " events, " m.searchFilters.Length " filters)", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Guided macro '" name "' saved! (" m.events.Length " events, " m.searchFilters.Length " filters)", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -9374,7 +9447,7 @@ GuidedPlayThread(m) {
             }
             if (!invFound) {
                 MacroLog("GuidedPlay: inventory TIMEOUT")
-                ToolTip(" Inventory not detected — press " StrUpper(pcAccessKey) " at an inventory`n F1 = Stop", 0, 0)
+                AioTip(" Inventory not detected — press " StrUpper(pcAccessKey) " at an inventory`n F1 = Stop", 0, 0)
                 SetTimer(() => GuidedShowArmedTooltip(m), -2000)
                 continue
             }
@@ -9475,7 +9548,7 @@ GuidedPlayThread(m) {
         global macroActiveIdx := 0
         MacroSaveIfDirty()
     }
-    ToolTip()
+    AioTipOff()
 }
 
 GuidedReplaySingle(m, mouseSpd) {
@@ -9603,7 +9676,7 @@ GuidedShowArmedTooltip(m) {
         for i, f in filters
             filterHint .= (i > 1 ? ", " : "") f
     }
-    ToolTip(" ► " m.name " — " modeStr filterHint "`n" MacroSpeedHint(m) "`n F = run  |  Q = toggle single/full  |  Z = next macro  |  F1 = Stop", 0, 0)
+    AioTip(" ► " m.name " — " modeStr filterHint "`n" MacroSpeedHint(m) "`n F = run  |  Q = toggle single/full  |  Z = next macro  |  F1 = Stop", 0, 0)
 }
 
 GuidedApplySearchFilter(filter, usePlayerBar := false) {
@@ -9912,8 +9985,8 @@ ComboStartWizard(*) {
     if (macroPlaying)
         return
     if (macroList.Length >= 10) {
-        ToolTip(" Max 10 macros — delete one first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Max 10 macros — delete one first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     MacroBlockAllHotkeys()
@@ -10006,8 +10079,8 @@ ComboSpSave(*) {
 
     name := Trim(comboSpNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
 
@@ -10045,8 +10118,8 @@ ComboSpSave(*) {
     try comboWizGui.Destroy()
     global comboWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
-    ToolTip(" Combo '" name "' saved! (P:" pcFilters.Length " M:" mfFilters.Length ")", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Combo '" name "' saved! (P:" pcFilters.Length " M:" mfFilters.Length ")", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 ComboShowStep1() {
@@ -10213,8 +10286,8 @@ ComboStep4Next(*) {
             comboMagicFFilters.Push(val)
     }
     if (comboMagicFFilters.Length = 0) {
-        ToolTip("Enter at least one Magic F filter!")
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("Enter at least one Magic F filter!")
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     try comboWizGui.Hide()
@@ -10329,8 +10402,8 @@ ComboDoSave(*) {
     name := Trim(comboNameEdit.Value)
     hk := Trim(comboHkEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m := {}
@@ -10354,8 +10427,8 @@ ComboDoSave(*) {
     MacroRegisterHotkeys(macroTabActive)
     tkLabel := comboTakeCount > 0 ? " take:" comboTakeCount : ""
     MacroLog("ComboSave: '" name "' saved — pop:" comboPopcornFilters.Length " mf:" comboMagicFFilters.Length tkLabel " hk=" m.hotkey)
-    ToolTip(" Combo '" name "' saved! (Pop:" comboPopcornFilters.Length " MF:" comboMagicFFilters.Length tkLabel ")", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Combo '" name "' saved! (Pop:" comboPopcornFilters.Length " MF:" comboMagicFFilters.Length tkLabel ")", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 ComboCancel(*) {
@@ -10407,7 +10480,7 @@ ComboPlayThread(m) {
             curFilter := pcFilters[comboFilterIdx]
             filterLabel := curFilter = "" ? "(all)" : curFilter
             MacroLog("ComboPlay: POPCORN mode  filterIdx=" comboFilterIdx " filter=" filterLabel)
-            ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+            AioTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
 
             if (firstEntry) {
                 firstEntry := false
@@ -10440,7 +10513,7 @@ ComboPlayThread(m) {
                     global comboMode := 2
                     global comboFilterIdx := 1
                     MacroLog("ComboPlay: Q → swapped to MAGIC F")
-                    ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    AioTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     break
                 }
                 if (GetKeyState("r", "P")) {
@@ -10454,7 +10527,7 @@ ComboPlayThread(m) {
                         Send("{Escape}")
                         Sleep(300)
                     }
-                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    AioTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                 }
                 if (GetKeyState("z", "P")) {
                     while (GetKeyState("z", "P") && macroPlaying)
@@ -10482,7 +10555,7 @@ ComboPlayThread(m) {
                     Sleep(100)
                     if (!ComboWaitForInv(3000)) {
                         MacroLog("ComboPlay: inventory TIMEOUT")
-                        ToolTip(" Inventory not detected — try again`n" ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        AioTip(" Inventory not detected — try again`n" ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     } else {
                         curFilter := pcFilters[comboFilterIdx]
                         if (curFilter != "") {
@@ -10504,7 +10577,7 @@ ComboPlayThread(m) {
             curFilter := mfFilters[comboFilterIdx]
             filterLabel := curFilter = "" ? "(all)" : curFilter
             MacroLog("ComboPlay: MAGIC F mode (armed)  filterIdx=" comboFilterIdx " filter=" filterLabel)
-            ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+            AioTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
 
             while (macroPlaying && comboRunning && comboMode = 2) {
                 if (MacroDialogOpen()) {
@@ -10517,7 +10590,7 @@ ComboPlayThread(m) {
                     global comboMode := 1
                     global comboFilterIdx := 1
                     MacroLog("ComboPlay: Q → swapped to POPCORN")
-                    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                    AioTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     break
                 }
                 if (GetKeyState("r", "P")) {
@@ -10526,7 +10599,7 @@ ComboPlayThread(m) {
                     if (mfFilters.Length > 1) {
                         global comboFilterIdx := comboFilterIdx >= mfFilters.Length ? 1 : comboFilterIdx + 1
                         MacroLog("ComboPlay: R → MF filter #" comboFilterIdx)
-                        ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        AioTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     }
                 }
                 if (GetKeyState("z", "P")) {
@@ -10555,7 +10628,7 @@ ComboPlayThread(m) {
                     Sleep(100)
                     if (!ComboWaitForInv(3000)) {
                         MacroLog("ComboPlay: MF inventory TIMEOUT")
-                        ToolTip(" Inventory not detected — try again`n" ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        AioTip(" Inventory not detected — try again`n" ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     } else {
                         curFilter := mfFilters[comboFilterIdx]
                         MacroLog("ComboPlay: MF filter #" comboFilterIdx " [" (curFilter = "" ? "(all)" : curFilter) "] → Transfer All")
@@ -10564,7 +10637,7 @@ ComboPlayThread(m) {
                         MacroLog("ComboPlay: MF give done — closing inv")
                         Send("{Escape}")
                         Sleep(300)
-                        ToolTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        AioTip(ComboBuildTooltip(m, "magicf", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                     }
                 }
                 Sleep(50)
@@ -10580,8 +10653,8 @@ ComboPlayThread(m) {
         global macroPlaying := false
         global macroActiveIdx := 0
         MacroSaveIfDirty()
-        ToolTip(" " m.name " stopped", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" " m.name " stopped", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
     }
 }
 
@@ -10650,7 +10723,7 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
                 PcClearFilter()
             }
         }
-        ToolTip(ComboBuildTooltip(m, "dropping", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+        AioTip(ComboBuildTooltip(m, "dropping", comboFilterIdx, pcFilters, mfFilters), 0, 0)
         MacroLog("ComboPlay: drop grid filter #" fi " rows=" pcRows " cols=" pcColumns)
         passNum := 0
         ocrFails := 0
@@ -10671,7 +10744,7 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
                         MacroLog("ComboPlay: R → closing inv from drop grid (pass " passNum ")")
                         Send("{Escape}")
                         Sleep(300)
-                        ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+                        AioTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
                         return
                     }
                     if (!WinActive(arkwindow))
@@ -10724,7 +10797,7 @@ ComboPopcornDropLoop(m, pcFilters, mfFilters) {
     }
     Send("{Escape}")
     Sleep(300)
-    ToolTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
+    AioTip(ComboBuildTooltip(m, "popcorn", comboFilterIdx, pcFilters, mfFilters), 0, 0)
 }
 
 ComboMagicFGive() {
@@ -10941,7 +11014,7 @@ GuidedReRecord(idx, *) {
     global guidedRecordLastTick := A_TickCount
     GuidedRecordSetHotkeys(true)
     SetTimer(GuidedRecordMousePoll, 50)
-    ToolTip(" RE-RECORDING: " m.name " (0 events)`n Open inventory and perform actions`n F1 = Stop & Save", 0, 0)
+    AioTip(" RE-RECORDING: " m.name " (0 events)`n Open inventory and perform actions`n F1 = Stop & Save", 0, 0)
 }
 
 GuidedShowReRecordSetup(idx, mode, slotCount, dropKey, filter) {
@@ -11099,8 +11172,8 @@ GuidedReRecordSetupSave(idx, mode, *) {
     global guidedWizGui := ""
     MacroRegisterHotkeys(macroTabActive)
     MacroLog("GuidedReRecSetup: '" m.name "' " mode " → " slotCount " items, " events.Length " events")
-    ToolTip(" Updated '" m.name "' — " slotCount " items (" events.Length " events)", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTip(" Updated '" m.name "' — " slotCount " items (" events.Length " events)", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 GuidedReRecordStop() {
@@ -11113,27 +11186,27 @@ GuidedReRecordStop() {
     global guidedReRecordIdx := 0
     GuidedRecordSetHotkeys(false)
     SetTimer(GuidedRecordMousePoll, 0)
-    ToolTip()
+    AioTipOff()
     MacroLog("GuidedReRecord: STOPPED  events=" guidedRecordEvents.Length)
     MacroRegisterHotkeys(macroTabActive)
     if (guidedRecordEvents.Length = 0) {
         MacroLog("GuidedReRecord: empty — keeping old events")
-        ToolTip(" Re-recording empty — old events kept", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Re-recording empty — old events kept", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return true
     }
     GuidedCleanRecordedEvents()
     if (guidedRecordEvents.Length = 0) {
         MacroLog("GuidedReRecord: all cleaned — keeping old events")
-        ToolTip(" Re-recording cleaned to nothing — old events kept", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Re-recording cleaned to nothing — old events kept", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return true
     }
     idx := savedReRecIdx
     if (idx < 1 || idx > macroList.Length) {
         MacroLog("GuidedReRecord: invalid idx=" idx " — discarding")
-        ToolTip(" Re-record error — macro not found", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Re-record error — macro not found", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return true
     }
     m := macroList[idx]
@@ -11146,8 +11219,8 @@ GuidedReRecordStop() {
     MacroUpdateListView()
     global guidedRecordEvents := []
     MacroLog("GuidedReRecord: replaced " oldCount " → " m.events.Length " events for '" m.name "'")
-    ToolTip(" Re-recorded '" m.name "' — " m.events.Length " events (was " oldCount ")`n F1 = Show UI  |  " StrUpper(pcAccessKey) " at inventory = run", 0, 0)
-    SetTimer(() => ToolTip(), -4000)
+    AioTip(" Re-recorded '" m.name "' — " m.events.Length " events (was " oldCount ")`n F1 = Show UI  |  " StrUpper(pcAccessKey) " at inventory = run", 0, 0)
+    SetTimer(() => AioTipOff(),-4000)
     global macroSelectedIdx := idx
     global macroArmed := true
     MacroRegisterHotkeys(macroTabActive)
@@ -11168,8 +11241,8 @@ GuidedEditSave(idx, *) {
     m := macroList[idx]
     name := Trim(geNameEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m.name := name
@@ -11193,8 +11266,8 @@ GuidedEditSave(idx, *) {
     MacroUpdateListView()
     MacroRegisterHotkeys(macroTabActive)
     try macroEditGui.Destroy()
-    ToolTip(" Guided macro updated!", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(" Guided macro updated!", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 ComboShowEditDialog(idx) {
@@ -11270,8 +11343,8 @@ ComboEditSave(idx, *) {
     name := Trim(ceNameEdit.Value)
     hk := Trim(ceHkEdit.Value)
     if (name = "") {
-        ToolTip("Enter a name!")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Enter a name!")
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     m.name := name
@@ -11290,8 +11363,8 @@ ComboEditSave(idx, *) {
     MacroUpdateListView()
     MacroRegisterHotkeys(macroTabActive)
     try macroEditGui.Destroy()
-    ToolTip(" Combo macro updated!", 0, 0)
-    SetTimer(() => ToolTip(), -2000)
+    AioTip(" Combo macro updated!", 0, 0)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -11658,7 +11731,7 @@ SendWindowText(input) {
 UpdateSimStatus(text) {
     SimStatusText.Value := text
     if (toolboxEnabled) {
-        ToolTip("Simming for: " ServerNumberEdit.Text " | " text, 0, 0)
+        AioTip("Simming for: " ServerNumberEdit.Text " | " text, 0, 0)
     }
 }
 
@@ -11859,7 +11932,7 @@ SimLoopA() {
                     SimStatusText.Value := ""
                     TaskbarRestore()
                     ntfypush("max", ServerNumberEdit.Text)
-                    ToolTip()
+                    AioTipOff()
                     MainGui.Hide
                     global guiVisible := false
                     WinActivate(GameWindow)
@@ -11994,7 +12067,7 @@ SimLoopB() {
                     SimStatusText.Value := ""
                     TaskbarRestore()
                     ntfypush("max", ServerNumberEdit.Text)
-                    ToolTip()
+                    AioTipOff()
                     MainGui.Hide
                     global guiVisible := false
                     WinActivate(GameWindow)
@@ -12081,7 +12154,7 @@ AutoSimButtonToggle(*) {
         SetTimer(SimLoop, 10)
         SimLoop()
         if (toolboxEnabled) {
-            ToolTip("Simming for: " ServerNumberEdit.Text " | Starting...", 0, 0)
+            AioTip("Simming for: " ServerNumberEdit.Text " | Starting...", 0, 0)
         }
     } else {
         WinMove(0, 0,,, GameWindow)
@@ -12092,8 +12165,8 @@ AutoSimButtonToggle(*) {
         global simcyclestatus := "Idle"
         SimStatusText.Value := ""
         if (toolboxEnabled) {
-            ToolTip("Sim Stopped", 0, 0)
-            SetTimer(() => ToolTip(), -2000)
+            AioTip("Sim Stopped", 0, 0)
+            SetTimer(() => AioTipOff(),-2000)
         }
     }
 }
@@ -12111,15 +12184,15 @@ SheepDetectKey(ctrl, *) {
     ih.KeyOpt("{All}", "E")
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
     ih.Start()
-    ToolTip("Press a key...")
+    AioTip("Press a key...")
     ih.Wait()
-    ToolTip()
+    AioTipOff()
     if (ih.EndReason = "EndKey") {
         ctrl.Value := ih.EndKey
     } else if (ih.EndReason = "Timeout") {
         ctrl.Value := ""
-        ToolTip("Timed out")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Timed out")
+        SetTimer(() => AioTipOff(),-1500)
     }
 }
 
@@ -12208,7 +12281,7 @@ SheepHotkeyAutoLvl(thisHotkey) {
             Sleep(100)
             PcLog("SheepAutoLvl: activated ARK")
         }
-        ToolTip("Sheep Auto LvL ON  |  " sheepAutoLvlKey " = Toggle", 0, 20)
+        AioTip("Sheep Auto LvL ON  |  " sheepAutoLvlKey " = Toggle", 0, 20)
     } else {
         global sheepModeActive := false
         if (sheepLevelActionKey != sheepAutoLvlKey)
@@ -12218,7 +12291,7 @@ SheepHotkeyAutoLvl(thisHotkey) {
             WinActivate(arkWindow)
             Sleep(100)
         }
-        ToolTip()
+        AioTipOff()
     }
     PcLog("SheepAutoLvl: toggle complete — autoLvl now=" sheepAutoLvlActive " modeActive=" sheepModeActive)
 }
@@ -12239,8 +12312,8 @@ SheepApplyKeys(ctrl, info) {
     newAutoLvl   := Trim(sheepAutoLvlInput.Value)
 
     if (newToggle == "" || newOvercap == "" || newInventory == "" || newAutoLvl == "") {
-        ToolTip("All key fields must be filled!")
-        SetTimer(() => ToolTip(), -2000)
+        AioTip("All key fields must be filled!")
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -12262,11 +12335,11 @@ SheepApplyKeys(ctrl, info) {
     global pcInvKey := sheepInventoryKey
     IniWrite(sheepAutoLvlKey,   configFile, "Sheep", "AutoLvlKey")
 
-    ToolTip("Sheep settings saved!`nStart/Pause: " sheepToggleKey
+    AioTip("Sheep settings saved!`nStart/Pause: " sheepToggleKey
         "`nOvercap: " sheepOvercapKey
         "`nInventory: " sheepInventoryKey
         "`nAuto LvL: " sheepAutoLvlKey)
-    SetTimer(() => ToolTip(), -3000)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -12293,8 +12366,8 @@ SheepToggleScript() {
         SheepShowStatusGui()
         if WinExist(arkWindow)
             WinActivate(arkWindow)
-        ToolTip("Sheep STARTED")
-        SetTimer(() => ToolTip(), -1500)
+        AioTip("Sheep STARTED")
+        SetTimer(() => AioTipOff(),-1500)
         SetTimer(SheepStartLoop, -1)
     }
 }
@@ -12317,15 +12390,15 @@ SheepStopScript() {
     global guiVisible := true
     if WinExist(arkWindow)
         WinActivate(arkWindow)
-    ToolTip("Sheep PAUSED")
-    SetTimer(() => ToolTip(), -1500)
+    AioTip("Sheep PAUSED")
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 SheepToggleOvercap() {
     global overcappingToggle
     overcappingToggle := !overcappingToggle
-    ToolTip(overcappingToggle ? "Overcapping: ON" : "Overcapping: OFF")
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(overcappingToggle ? "Overcapping: ON" : "Overcapping: OFF")
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -12347,9 +12420,9 @@ SheepToggleAutoLvl() {
         SheepShowAutoLvlGui()
         if WinExist(arkWindow)
             WinActivate(arkWindow)
-        ToolTip("Sheep Auto LvL ON  |  " sheepAutoLvlKey " = Toggle", 0, 20)
+        AioTip("Sheep Auto LvL ON  |  " sheepAutoLvlKey " = Toggle", 0, 20)
     } else {
-        ToolTip()
+        AioTipOff()
         if (sheepLevelActionKey != sheepAutoLvlKey)
             try Hotkey("$" sheepLevelActionKey, "Off")
         SheepHideAutoLvlGui()
@@ -12365,7 +12438,7 @@ SheepStopAutoLvl() {
     if (sheepLevelActionKey != sheepAutoLvlKey)
         try Hotkey("$" sheepLevelActionKey, "Off")
     SheepHideAutoLvlGui()
-    ToolTip()
+    AioTipOff()
     if WinExist(arkWindow)
         WinActivate(arkWindow)
 }
@@ -12848,7 +12921,7 @@ NFSearchTol(&fX, &fY, x1, y1, x2, y2, color, tol := 0) {
 OBSetStatus(msg) {
     global obStatusText
     try obStatusText.Value := msg
-    ToolTip(" Auto Upload — " msg "`nF6 = next mode  |  F1 = Show UI  |  Q = Stop", 0, 20)
+    AioTip(" Auto Upload — " msg "`nF6 = next mode  |  F1 = Show UI  |  Q = Stop", 0, 20)
 }
 
 OBWaitInvClose(reason) {
@@ -12862,7 +12935,7 @@ OBWaitInvClose(reason) {
             if !NFSearchTol(&px, &py, obConfirmPixX, obConfirmPixY, obConfirmPixX, obConfirmPixY, "0xFFFFFF", 15) {
                 obLog.Push("Inv closed detected — ready for F")
                 OBSetStatus("Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")")
-                ToolTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+                AioTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
                 return
             }
         }
@@ -12872,7 +12945,7 @@ OBWaitInvClose(reason) {
     if (timeout <= 0) {
         obLog.Push("Inv close poll timed out (120s)")
         OBSetStatus("Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")")
-        ToolTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
+        AioTip(" Press " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F1 = cancel", 0, 0)
     }
 }
 
@@ -12886,8 +12959,8 @@ OBStopAll(hideGui := true) {
     global obCharTimerStage := 0
     OBCharUnregisterSvrKeys()
     try obStatusText.Value := ""
-    ToolTip()
-    ToolTip(,,,2)
+    AioTipOff()
+    AioTipOff(2)
     if (hideGui) {
         MainGui.Hide()
         global guiVisible := false
@@ -12907,18 +12980,18 @@ OBUploadCycle() {
         PcRegisterSpeedHotkeys(false)
         PcUpdateUI()
         PcLog("OBUploadCycle: popcorn disabled to avoid F conflict")
-        ToolTip(" Switched to OB Upload — popcorn off", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Switched to OB Upload — popcorn off", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
     }
 
     if (obUploadRunning) {
         if (obUploadPaused) {
             global obUploadPaused := false
             OBSetStatus("Resumed...")
-            ToolTip()
+            AioTipOff()
         } else {
             global obUploadPaused := true
-            ToolTip(" OB Upload PAUSED`nF6 = resume", 10, 20)
+            AioTip(" OB Upload PAUSED`nF6 = resume", 10, 20)
         }
         return
     }
@@ -13027,7 +13100,7 @@ OBFPressed() {
                     global obUploadRunning := false
                     global obUploadArmed := true
                     OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
-                    ToolTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                    AioTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                     PerfLogPush("ob_cryo", _obStart, "failed")
                     return
                 }
@@ -13047,7 +13120,7 @@ OBFPressed() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
-                ToolTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                AioTip(" OB Upload [Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                 PerfLogPush("ob_cryo", _obStart, "failed")
                 return
             }
@@ -13102,7 +13175,7 @@ OBFPressed() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
-                ToolTip(" OB Upload [Tek+Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
+                AioTip(" OB Upload [Tek+Cryos]: Not at transmitter`n" StrUpper(pcAccessKey) " at OB to retry  |  F6 = cycle  |  F1 = UI", 0, 0)
                 return
             }
             obLog.Push("[TEK " i "/6] result=" (found?"found items":"no items found"))
@@ -13213,7 +13286,7 @@ OBUploadCharacterThread() {
         global obUploadRunning := false
         OBSetStatus("Not at transmitter — " StrUpper(pcAccessKey) " to retry")
         OBCharRegisterSvrKeys()
-        ToolTip(" Upload Character: transmitter not detected`n" StrUpper(pcAccessKey) " to retry  |  ↑↓ cycle  |  F6 = cycle  |  F1 = UI", 0, 0)
+        AioTip(" Upload Character: transmitter not detected`n" StrUpper(pcAccessKey) " to retry  |  ↑↓ cycle  |  F6 = cycle  |  F1 = UI", 0, 0)
         return
     }
     obLog.Push("Transmitter detected after " (waitCount * 16) "ms  pixel=(" obConfirmPixX "," obConfirmPixY ")")
@@ -13249,8 +13322,8 @@ OBUploadCharacterThread() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Upload timer: " tm ":" Format("{:02}", ts) " — " StrUpper(pcAccessKey) " to manage items (" modeLabel ")")
-                ToolTip(" " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
-                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
+                AioTip(" " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
+                AioTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
         } catch as ocrErr {
@@ -13295,8 +13368,8 @@ OBUploadCharacterThread() {
                 global obUploadRunning := false
                 global obUploadArmed := true
                 OBSetStatus("Timer " tm ":" Format("{:02}", ts) " still active — " StrUpper(pcAccessKey) " to manage items (" modeLabel ")")
-                ToolTip(" Timer still active — " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
-                ToolTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
+                AioTip(" Timer still active — " StrUpper(pcAccessKey) " to manage items  |  F1 = cancel", 0, 0)
+                AioTip(" Upload timer: " tm ":" Format("{:02}", ts), 0, 40, 2)
                 return
             }
             obLog.Push("No timer — proceeding to Travel")
@@ -13439,7 +13512,7 @@ OBUploadCharacterThread() {
     joinAttempts := 0
     while (obUploadRunning && joinAttempts < 30) {
         joinAttempts++
-        ToolTip()  
+        AioTipOff()  
         DllCall("SetCursorPos", "int", obcJoinX, "int", obcJoinY)
         Sleep(50)
         Click()
@@ -13494,8 +13567,8 @@ OBUploadCharacterThread() {
         global obUploadMode := 3
         global obCharTimerStage := 0
         OBSetStatus("Join failed — press " StrUpper(pcAccessKey) " at transmitter to retry")
-        ToolTip(" Join failed — server not marked`n Press " StrUpper(pcAccessKey) " at transmitter to retry", 0, 0)
-        SetTimer(() => ToolTip(), -4000)
+        AioTip(" Join failed — server not marked`n Press " StrUpper(pcAccessKey) " at transmitter to retry", 0, 0)
+        SetTimer(() => AioTipOff(),-4000)
         return
     }
     Sleep(1000)
@@ -13507,9 +13580,9 @@ OBUploadCharacterThread() {
     OBCharUnregisterSvrKeys()
     obLog.Push("Upload Char complete → server " serverNum " — mode OFF")
     OBSetStatus("")
-    ToolTip(,,,2)
-    ToolTip(" Upload Char done → " serverNum "`n F6 to re-enable  |  F1 = UI", 0, 0)
-    SetTimer(() => ToolTip(), -3000)
+    AioTipOff(2)
+    AioTip(" Upload Char done → " serverNum "`n F6 to re-enable  |  F1 = UI", 0, 0)
+    SetTimer(() => AioTipOff(),-3000)
 }
 
 OBCharSaveServer(*) {
@@ -13518,11 +13591,11 @@ OBCharSaveServer(*) {
     if (val != "" && val != "2386") {
         global obCharCustomServer := val
         IniWrite(val, A_ScriptDir "\AIO_config.ini", "UploadChar", "CustomServer")
-        ToolTip(" Saved server: " val " (F6 alternates with 2386)", 0, 0)
+        AioTip(" Saved server: " val " (F6 alternates with 2386)", 0, 0)
     } else {
-        ToolTip(" Enter a server other than 2386 to save", 0, 0)
+        AioTip(" Enter a server other than 2386 to save", 0, 0)
     }
-    SetTimer(() => ToolTip(), -2000)
+    SetTimer(() => AioTipOff(),-2000)
 }
 
 OBCharSaveServerSilent() {
@@ -13548,7 +13621,7 @@ OBCharRestoreTooltip() {
             break
         }
     }
-    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
+    AioTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
 }
 
 OBCharLoadServer() {
@@ -13593,8 +13666,8 @@ OBCharSvrDown(*) {
 OBCharSvrCycle(dir) {
     global svrList, ServerNumberEdit, obCharSvrIdx
     if (svrList.Length = 0) {
-        ToolTip(" No servers in list — add via Tab 1", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" No servers in list — add via Tab 1", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     global obCharSvrIdx := obCharSvrIdx + dir
@@ -13615,7 +13688,7 @@ OBCharSvrCycle(dir) {
         nextLabel := customSvr
     note := (entry.note != "") ? " (" entry.note ")" : ""
     OBSetStatus("Upload Char → " nextLabel note)
-    ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
+    AioTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
 }
 
 ; ── Server List ──────────────────────────────────────────────────────────────
@@ -13637,22 +13710,22 @@ SvrAddCurrent(*) {
     global svrList, ServerNumberEdit
     num := Trim(ServerNumberEdit.Text)
     if (num = "" || !RegExMatch(num, "^\d+$")) {
-        ToolTip(" Enter a server number first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Enter a server number first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     for entry in svrList {
         if (entry.num = num) {
-            ToolTip(" Server " num " already in list", 0, 0)
-            SetTimer(() => ToolTip(), -1500)
+            AioTip(" Server " num " already in list", 0, 0)
+            SetTimer(() => AioTipOff(),-1500)
             return
         }
     }
     svrList.Push({num: num, note: ""})
     SvrSaveList()
     SvrRefreshDDL()
-    ToolTip(" Added server " num, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Added server " num, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 SvrRemoveSelected(*) {
@@ -13668,15 +13741,15 @@ SvrRemoveSelected(*) {
         }
     }
     if (found = 0) {
-        ToolTip(" Server " num " not in list", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Server " num " not in list", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     svrList.RemoveAt(found)
     SvrSaveList()
     SvrRefreshDDL()
-    ToolTip(" Removed server " num, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Removed server " num, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 SvrEditNote(*) {
@@ -13692,8 +13765,8 @@ SvrEditNote(*) {
         }
     }
     if (found = 0) {
-        ToolTip(" Add server first with +", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Add server first with +", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     if (IsSet(svrNoteGui) && svrNoteGui != "") {
@@ -13775,8 +13848,8 @@ UfAddFilter(*) {
         return
     for entry in ufList {
         if (entry = val) {
-            ToolTip(" Filter already in list", 0, 0)
-            SetTimer(() => ToolTip(), -1500)
+            AioTip(" Filter already in list", 0, 0)
+            SetTimer(() => AioTipOff(),-1500)
             return
         }
     }
@@ -13784,8 +13857,8 @@ UfAddFilter(*) {
     UfSaveList()
     UfRefreshDDL()
     ufFilterCombo.Text := val
-    ToolTip(" Added filter: " val, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Added filter: " val, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 UfRemoveFilter(*) {
@@ -13801,16 +13874,16 @@ UfRemoveFilter(*) {
         }
     }
     if (found = 0) {
-        ToolTip(" Filter not in list", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Filter not in list", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     ufList.RemoveAt(found)
     UfSaveList()
     UfRefreshDDL()
     ufFilterCombo.Text := ""
-    ToolTip(" Removed filter: " val, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Removed filter: " val, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 UfRefreshDDL() {
@@ -13862,16 +13935,16 @@ _ListAdd(list, combo, section) {
     if (val = "")
         return
     if (AcListHas(list, val)) {
-        ToolTip(" Already in list", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Already in list", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     list.Push(val)
     _ListSave(list, section)
     _ListRefresh(list, combo)
     combo.Text := val
-    ToolTip(" Added: " val, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Added: " val, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 _ListRemove(list, combo, section) {
@@ -13886,16 +13959,16 @@ _ListRemove(list, combo, section) {
         }
     }
     if (found = 0) {
-        ToolTip(" Not in list", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Not in list", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     list.RemoveAt(found)
     _ListSave(list, section)
     _ListRefresh(list, combo)
     combo.Text := ""
-    ToolTip(" Removed: " val, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Removed: " val, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 _ListRefresh(list, combo) {
@@ -14013,9 +14086,9 @@ OBCheckUploadTimer(filter := "") {
         MainGui.Hide()
         global guiVisible := false
     }
-    ToolTip()
-    ToolTip(,,,1)
-    ToolTip(,,,2)
+    AioTipOff()
+    AioTipOff(1)
+    AioTipOff(2)
 
     invOpen := false
     invWait := 0
@@ -14095,17 +14168,17 @@ OBCheckUploadTimer(filter := "") {
         while (timerSec > 0 && obUploadRunning) {
             m := timerSec // 60
             s := Mod(timerSec, 60)
-            ToolTip(" Upload timer: " m ":" Format("{:02}", s) "`n Waiting to upload...  |  F1 = cancel", 0, 0)
+            AioTip(" Upload timer: " m ":" Format("{:02}", s) "`n Waiting to upload...  |  F1 = cancel", 0, 0)
             Sleep(1000)
             timerSec--
         }
-        ToolTip()
+        AioTipOff()
         if (!obUploadRunning)
             return true
         global obUploadRunning := false
         global obUploadArmed := true
         modeLabel := (obUploadMode = 1) ? "Cryos" : (obUploadMode = 2) ? "Tek+Cryos" : "Upload Char"
-        ToolTip(" Timer done — " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F6 = cycle  |  F1 = UI", 0, 0)
+        AioTip(" Timer done — " StrUpper(pcAccessKey) " at transmitter (" modeLabel ")`n F6 = cycle  |  F1 = UI", 0, 0)
         obLog.Push("Timer expired — re-armed (" modeLabel ")")
         return true
     }
@@ -14217,11 +14290,11 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
     global obDataLoadedPixX, obDataLoadedPixY
     dataWaitStart := A_TickCount
     dataLoaded := false
-    ToolTip(" Waiting for Ark data to load before uploading", 0, 0)
+    AioTip(" Waiting for Ark data to load before uploading", 0, 0)
     OBSetStatus("Waiting for Ark data to load...")
     loop 500 {  
         if (!obUploadRunning) {
-            ToolTip()
+            AioTipOff()
             return false
         }
         dc := PxGet(obDataLoadedPixX, obDataLoadedPixY)
@@ -14235,7 +14308,7 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
         Sleep(16)
     }
     dataWaitMs := A_TickCount - dataWaitStart
-    ToolTip()
+    AioTipOff()
     if (dataLoaded) {
         obLog.Push("[1b] ARK data loaded after " dataWaitMs "ms  pix(" obDataLoadedPixX "," obDataLoadedPixY ")=0x" Format("{:06X}", PxGet(obDataLoadedPixX, obDataLoadedPixY)))
     } else {
@@ -14464,11 +14537,11 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
                     if (_mr > NFT(200, 1) && _mg < NFT(40, -1) && _mb < NFT(40, -1)) {
                         obLog.Push("[!] Max items popup during refresh at clearWait=" clearWait)
                         OBSetStatus("Max Items Reached")
-                        ToolTip(" Max Items Reached", 0, 0)
+                        AioTip(" Max Items Reached", 0, 0)
                         Sleep(500)
                         ControlClick("x" obMaxItemsPixX " y" obMaxItemsPixY, arkwindow,,,,"NA")
                         Sleep(300)
-                        ToolTip()
+                        AioTipOff()
                         global obUploadRunning := false
                         break
                     }
@@ -14495,11 +14568,11 @@ OBRunUpload(filter, startMsg, doneMsg, checkEmpty, closeOnDone := true, skipNav 
         if (maxR > NFT(200, 1) && maxG < NFT(40, -1) && maxB < NFT(40, -1)) {
             obLog.Push("[!] Max items reached after " uploadCount " items — pixel 0x" Format("{:06X}", maxCol))
             OBSetStatus("Max Items Reached")
-            ToolTip(" Max Items Reached", 0, 0)
+            AioTip(" Max Items Reached", 0, 0)
             Sleep(500)
             ControlClick("x" obMaxItemsPixX " y" obMaxItemsPixY, arkwindow,,,,"NA")
             Sleep(300)
-            ToolTip()
+            AioTipOff()
             break
         }
 
@@ -14853,7 +14926,7 @@ OBGetEmptySlotColor() {
 OBDownSetStatus(msg) {
     global obDownText
     try obDownText.Value := msg
-    ToolTip(" Auto Empty OB — " msg "`nF1 = Show UI  |  Q = Stop", 0, 20)
+    AioTip(" Auto Empty OB — " msg "`nF1 = Show UI  |  Q = Stop", 0, 20)
 }
 
 OBDownStopAll(hideGui := true) {
@@ -14861,7 +14934,7 @@ OBDownStopAll(hideGui := true) {
     global obDownloadRunning := false
     global obDownloadPaused := false
     try obDownText.Value := ""
-    ToolTip()
+    AioTipOff()
     if (hideGui) {
         MainGui.Hide()
         global guiVisible := false
@@ -14879,15 +14952,15 @@ OBDownloadCycle() {
         PcRegisterSpeedHotkeys(false)
         PcUpdateUI()
         PcLog("OBDownloadCycle: popcorn disabled to avoid F conflict")
-        ToolTip(" Switched to OB Download — popcorn off", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Switched to OB Download — popcorn off", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
     }
 
     if (obDownloadRunning) {
         global obDownloadRunning := false
         global obDownloadPaused  := false
-        ToolTip(" Downloading stopped", 10, 20)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" Downloading stopped", 10, 20)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -14944,7 +15017,7 @@ OBRunDownload() {
         if (waitCount > 250) {
             global obDownloadRunning := false
             OBDownSetStatus("Not at transmitter — F7 to retry")
-            ToolTip(" OB Download: Not at transmitter`nF7 to retry  |  F1 = UI", 0, 0)
+            AioTip(" OB Download: Not at transmitter`nF7 to retry  |  F1 = UI", 0, 0)
             return
         }
     }
@@ -15038,11 +15111,11 @@ OBRunDownload() {
     if (!firstFound) {
         obLog.Push("[DL] no items loaded after 6s — ARK data load error")
         OBDownSetStatus("Data load error")
-        ToolTip(" Data load error — ARK issue`n Try opening another transmitter", 0, 0)
+        AioTip(" Data load error — ARK issue`n Try opening another transmitter", 0, 0)
         Sleep(500)
         Send("{Escape}")
         Sleep(3000)
-        ToolTip()
+        AioTipOff()
         OBDownStopAll()
         PerfLogPush("ob_download", navStartTime, "data_error")
         return
@@ -15235,13 +15308,13 @@ OBOcrToggleResize(idx) {
     global obOcrResizing, obOcrTarget
     global acOcrResizing, imprintResizing
     if (acOcrResizing) {
-        ToolTip(" Exit Craft OCR resize first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Exit Craft OCR resize first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     if (IsSet(imprintResizing) && imprintResizing) {
-        ToolTip(" Exit Imprint resize first", 0, 0)
-        SetTimer(() => ToolTip(), -1500)
+        AioTip(" Exit Imprint resize first", 0, 0)
+        SetTimer(() => AioTipOff(),-1500)
         return
     }
     if (obOcrResizing) {
@@ -15251,7 +15324,7 @@ OBOcrToggleResize(idx) {
     obOcrResizing := true
     obOcrTarget := idx
     label := (idx = 3) ? "Dn Count" : "Timer"
-    ToolTip(" OB OCR [" label "]: WASD=move  Arrows=size  Enter=done", 0, 0)
+    AioTip(" OB OCR [" label "]: WASD=move  Arrows=size  Enter=done", 0, 0)
     OBOcrShowOverlay()
     try Hotkey("$Up",    OBOcrSizeUp,    "On")
     try Hotkey("$Down",  OBOcrSizeDown,  "On")
@@ -15282,7 +15355,7 @@ OBOcrExitResize() {
     OBOcrHideOverlay()
     OBOcrUpdateSizeTxt()
     OBOcrSaveConfig()
-    ToolTip()
+    AioTipOff()
 }
 
 OBOcrResizeDone(*) {
@@ -15609,10 +15682,10 @@ StartOvercapScript() {
 
     if (overcapDediTarget > 0) {
         targetSec := OvercapDediMs(overcapDediTarget) // 1000
-        ToolTip(" Overcap RUNNING " overcapDediTarget " dedi (" targetSec ".00s)`nF2 = Pause  |  Q = Stop", 0, 0)
+        AioTip(" Overcap RUNNING " overcapDediTarget " dedi (" targetSec ".00s)`nF2 = Pause  |  Q = Stop")
         overcapCountdown.Value := "Overcapping " overcapDediTarget " Dedis  " targetSec ".00s"
     } else {
-        ToolTip(" Overcap RUNNING — free mode`nF2 = Pause  |  Q = Stop", 0, 0)
+        AioTip(" Overcap RUNNING — free mode`nF2 = Pause  |  Q = Stop")
         overcapCountdown.Value := "running — free"
     }
 
@@ -15630,7 +15703,7 @@ StopOvercapScript() {
     if (overcapStartTick > 0)
         global overcapAccumMs += A_TickCount - overcapStartTick
     global overcapStartTick := 0
-    ToolTip()
+    AioTipOff()
     OBCharRestoreTooltip()
     overcapCountdown.Value := ""
 }
@@ -15658,12 +15731,12 @@ OvercapTimerCheck() {
     remSec    := remaining // 1000
     remMs     := Mod(remaining, 1000) // 10
     overcapCountdown.Value := "Overcapping " overcapDediTarget " Dedis  " remSec "." Format("{:02}", remMs) "s"
-    ToolTip(" Overcap RUNNING " overcapDediTarget " dedi  (" remSec "." Format("{:02}", remMs) "s left)`nF2 = Pause  |  Q = Stop", 0, 0)
+    AioTip(" Overcap RUNNING " overcapDediTarget " dedi  (" remSec "." Format("{:02}", remMs) "s left)`nF2 = Pause  |  Q = Stop")
     if (elapsed >= target) {
         StopOvercapScript()
         overcapCountdown.Value := overcapDediTarget " Dedis done"
-        ToolTip(" Overcap done  " overcapDediTarget " dedi complete!", 0, 0)
-        SetTimer(() => ToolTip(), -3000)
+        AioTip(" Overcap done  " overcapDediTarget " dedi complete!")
+        SetTimer(() => AioTipOff(), -3000)
         SetTimer(() => (overcapCountdown.Value := ""), -4000)
     }
 }
@@ -15681,7 +15754,7 @@ OvercapDediEditChanged(*) {
     }
     targetSec := OvercapDediMs(val) // 1000
     if (runOvercapScript) {
-        ToolTip(" Overcap RUNNING " val " dedi`nF2 = Pause  |  Q = Stop", 0, 0)
+        AioTip(" Overcap RUNNING " val " dedi`nF2 = Pause  |  Q = Stop")
     }
     overcapCountdown.Value := "~" targetSec "s for " val " dedi"
 
@@ -15807,7 +15880,7 @@ PcCustomFilterChanged(ctrl, *) {
     global pcCustomFilter := ctrl.Text
     try IniWrite(ctrl.Text, A_ScriptDir "\AIO_config.ini", "Popcorn", "CustomFilter")
     if (pcMode > 0)
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
 }
 
 PcCustomFilterClear(*) {
@@ -15837,7 +15910,8 @@ PcCheckStorageEmpty() {
             cleaned := RegExReplace(sText, "[oO]", "0")
             cleaned := RegExReplace(cleaned, "[Il|]", "1")
             cleaned := RegExReplace(cleaned, "s(?=\d)", "5")
-            cleaned := RegExReplace(cleaned, "\d+\.\d+\s*/?\s*\d*\.?\d*", "")
+            cleaned := RegExReplace(cleaned, "\d+\.\d+\s*/\s*\d+\.\d+", "")
+            cleaned := RegExReplace(cleaned, "\.0(?!\d)", "")
             cleaned := RegExReplace(cleaned, "\s+", " ")
             if RegExMatch(cleaned, "(-?\d+)\s*/\s*(\d+)", &sMatch) {
                 val := Integer(sMatch[1])
@@ -15845,14 +15919,34 @@ PcCheckStorageEmpty() {
                 if (val < 0)
                     val := 0
                 if (val = 0 && StrLen(sMatch[1]) > 1) {
-                    PcLog("StorageCheck: suspicious 0 from [" sMatch[1] "] (" StrLen(sMatch[1]) " digits) — retrying")
+                    PcLog("StorageCheck: suspicious 0 from [" sMatch[1] "] raw=[" sText "] — retrying")
                     Sleep(80)
                     continue
                 }
-                if (maxVal >= 6 && maxVal <= 999) {
-                    PcLog("StorageCheck (" sx "," sy "): [" sText "] → " val "/" maxVal "  (attempt " attempts ")")
+                if (maxVal >= 6 && maxVal <= 9999) {
+                    if (val = 0) {
+                        Sleep(150)
+                        try {
+                            sText2 := OCR.FromRect(sx, sy, sw, sh, {scale: 3}).Text
+                            cleaned2 := RegExReplace(sText2, "[oO]", "0")
+                            cleaned2 := RegExReplace(cleaned2, "[Il|]", "1")
+                            cleaned2 := RegExReplace(cleaned2, "s(?=\d)", "5")
+                            cleaned2 := RegExReplace(cleaned2, "\d+\.\d+\s*/\s*\d+\.\d+", "")
+                            cleaned2 := RegExReplace(cleaned2, "\.0(?!\d)", "")
+                            cleaned2 := RegExReplace(cleaned2, "\s+", " ")
+                            if RegExMatch(cleaned2, "(-?\d+)\s*/\s*(\d+)", &sMatch2) {
+                                val2 := Integer(sMatch2[1])
+                                if (val2 > 0) {
+                                    PcLog("StorageCheck: 0 was transient — confirmed " val2 "/" sMatch2[2] " on re-read  raw=[" sText2 "]")
+                                    return val2
+                                }
+                            }
+                        }
+                    }
+                    PcLog("StorageCheck (" sx "," sy "): " val "/" maxVal "  raw=[" sText "]  (attempt " attempts ")")
                     return val
                 }
+                PcLog("StorageCheck: maxVal out of range " val "/" maxVal "  raw=[" sText "]  (attempt " attempts ")")
             }
             if RegExMatch(cleaned, "(\d+)\s*/\s*[-—–]+", &bagMatch) {
                 val := Integer(bagMatch[1])
@@ -15862,9 +15956,10 @@ PcCheckStorageEmpty() {
                 return val
             }
             if (!pcIsBag && attempts >= 2 && RegExMatch(cleaned, "^\s*/", )) {
-                PcLog("StorageCheck: bare slash after " attempts " attempts — assuming 0")
-                return 0
+                PcLog("StorageCheck: bare slash -> -1 (read fail) after " attempts " attempts raw=[" sText "] cleaned=[" cleaned "]")
+                return -1
             }
+            PcLog("StorageCheck: no pattern match raw=[" sText "] cleaned=[" cleaned "]  (attempt " attempts ")")
         } catch as e {
             PcLog("StorageCheck: OCR failed attempt " attempts " — " e.Message)
         }
@@ -15872,6 +15967,33 @@ PcCheckStorageEmpty() {
     }
     PcLog("StorageCheck: no valid reading after " attempts " attempts raw=[" sText "] cleaned=[" cleaned "]" (pcIsBag ? " (bag)" : ""))
     return -1
+}
+
+PcWaitForItemsLoaded(maxPolls := 60) {
+    polls := 0
+    stable := 0
+    while (polls < maxPolls) {
+        if (pcEarlyExit || pcF1Abort)
+            break
+        polls++
+        chk := PcCheckStorageEmpty()
+        if (chk > 0) {
+            PcLog("WaitForItems: items loaded (" chk ") after " polls " polls")
+            return true
+        }
+        if (chk = 0) {
+            stable++
+            if (stable >= 3) {
+                PcLog("WaitForItems: storage=0 confirmed after " polls " polls — nothing to drop")
+                return false
+            }
+        } else {
+            stable := 0
+        }
+        Sleep(50)
+    }
+    PcLog("WaitForItems: items never loaded after " polls " polls — proceeding anyway")
+    return true
 }
 
 PcToggleScanResize(*) {
@@ -15892,7 +16014,7 @@ PcToggleScanResize(*) {
     try Hotkey("$Right", PcScanGrowW, "On")
     try Hotkey("$Left", PcScanShrinkW, "On")
     try Hotkey("$Enter", PcScanResizeDone, "On")
-    ToolTip(" Storage scan area: WASD=move  Arrows=resize  Enter=done", 0, 0)
+    AioTip(" Storage scan area: WASD=move  Arrows=resize  Enter=done", 0, 0)
 }
 
 PcExitScanResize() {
@@ -15910,7 +16032,7 @@ PcExitScanResize() {
     try Hotkey("$Left", "Off")
     try Hotkey("$Enter", "Off")
     PcHideStorageOverlay()
-    ToolTip()
+    AioTipOff()
     PcSaveScanArea()
     PcLog("ScanResize: saved (" pcStorageScanX "," pcStorageScanY " " pcStorageScanW "x" pcStorageScanH ")")
 }
@@ -16286,8 +16408,8 @@ PcAdjustDropSleep(delta) {
     pcDropSleep := Max(1, pcDropSleep + (delta * step))
     PcSaveSpeedToINI()
     try pcSpeedTxt.Text := pcSpeedNames[pcSpeedMode] " [Z]"
-    ToolTip("Drop sleep: " pcDropSleep "ms  (±" step "ms)", 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip("Drop sleep: " pcDropSleep "ms  (±" step "ms)", 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
     PcLog("DropSleep adjusted to " pcDropSleep " (step=" step ")")
 }
 
@@ -16384,9 +16506,9 @@ PcCustomCheckToggle(ctrl, *) {
     }
     PcUpdateUI()
     if (pcMode > 0)
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
     else
-        ToolTip()
+        AioTipOff()
 }
 
 PcBuildTooltip() {
@@ -16482,9 +16604,9 @@ PcToggle(which) {
     }
     PcUpdateUI()
     if (pcMode > 0)
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
     else
-        ToolTip()
+        AioTipOff()
 }
 
 ; ── Execute button handler ────────────────────────────────────────────────────
@@ -16521,9 +16643,9 @@ PcExecuteBtn() {
     modeName  := modeNames.Has(pcMode) ? modeNames[pcMode] : "Popcorn"
     PcSetStatus(modeName " — press " StrUpper(pcAccessKey) " at an inventory")
     if (pcF10Step > 0)
-        ToolTip(PcBuildF10Tooltip(), 0, 0)
+        AioTip(PcBuildF10Tooltip())
     else
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
     MainGui.Hide()
     global guiVisible := false
     WinActivate(arkwindow)
@@ -16548,9 +16670,9 @@ PcRunCurrentMode() {
     }
     global pcIsTame := false
     if (pcF10Step > 0)
-        ToolTip(PcBuildF10Tooltip(), 0, 0)
+        AioTip(PcBuildF10Tooltip())
     else
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
 
     isTame := PcIsTameInventory()
     global pcIsTame := isTame
@@ -16570,7 +16692,7 @@ PcRunCurrentMode() {
         PcShowArmedTooltip()
     } else {
         PcRegisterSpeedHotkeys(false)
-        ToolTip()
+        AioTipOff()
     }
 }
 
@@ -16580,6 +16702,8 @@ PcUnifiedRun() {
     global pcEarlyExit, pcForgeTransferAll, pcForgeSkipFirst, pcCycleSleep
     global pcGrinderPoly, pcGrinderMetal, pcGrinderCrystal, pcPresetRaw, pcPresetCooked
     global pcCustomFilter, pcAllCustomActive, pcAllNoFilter
+    global pcEarlyExit := false
+    global pcF1Abort   := false
     stalled := false
 
     filters := []
@@ -16641,7 +16765,11 @@ PcUnifiedRun() {
             else
                 PcApplyFilter(f)
 
-            ToolTip(PcBuildTooltip(), 0, 0)
+            AioTip(PcBuildTooltip())
+            if (!PcWaitForItemsLoaded()) {
+                PcLog("UnifiedRun: " labels[i] " — nothing to drop, skipping")
+                continue
+            }
             passNum := 0
             ocrFails := 0
             lastStorage := -99
@@ -16696,6 +16824,10 @@ PcUnifiedRun() {
             PcClearFilter()
         else
             PcApplyFilter(filters[1])
+        if (!PcWaitForItemsLoaded()) {
+            PcLog("UnifiedRun: " labels[1] " — nothing to drop")
+            PcLog("UnifiedRun: " labels[1] " ended after 0 passes")
+        } else {
         passNum := 0
         ocrFails := 0
         lastStorage := -99
@@ -16737,7 +16869,7 @@ PcUnifiedRun() {
             Sleep(pcCycleSleep)
         }
         PcLog("UnifiedRun: " labels[1] " ended after " passNum " passes")
-
+        }
     } else {
         PcLog("UnifiedRun: START fallback all mode  skipFirst=" pcForgeSkipFirst "  xferAll=" pcForgeTransferAll)
         if (pcCustomFilter != "" || pcCustomFilterList.Length > 0) {
@@ -16749,6 +16881,9 @@ PcUnifiedRun() {
         } else {
             PcClearFilter()
         }
+        if (!PcWaitForItemsLoaded()) {
+            PcLog("UnifiedRun: fallback — nothing to drop")
+        } else {
         passNum := 0
         ocrFails := 0
         lastStorage := -99
@@ -16791,6 +16926,7 @@ PcUnifiedRun() {
             Sleep(pcCycleSleep)
         }
         PcLog("UnifiedRun: loop ended after " passNum " passes")
+        }
     }
 
     if (pcF1Abort) {
@@ -16901,7 +17037,7 @@ PcShowSetKeysForm() {
     formGui.Show("w328 h228")
 
     PcSaveKeysFromForm(*) {
-        ToolTip()
+        AioTipOff()
         newAccess := StrLower(Trim(accessEdit.Value))
         newInv    := StrLower(Trim(invEdit.Value))
         newDrop   := StrLower(Trim(dropEdit.Value))
@@ -16937,9 +17073,9 @@ PcDetectKeyIntoEdit(ctrl) {
     ih.KeyOpt("{LControl}{RControl}{LAlt}{RAlt}{LShift}{RShift}{LWin}{RWin}", "-E")
     ih.KeyOpt("{LButton}{RButton}{MButton}{WheelUp}{WheelDown}", "-E")
     ih.Start()
-    ToolTip("Press a key...", 0, 0)
+    AioTip("Press a key...", 0, 0)
     ih.Wait()
-    ToolTip()
+    AioTipOff()
     if (ih.EndReason = "EndKey" && ih.EndKey != "")
         ctrl.Value := ih.EndKey
 }
@@ -17200,7 +17336,7 @@ AcDoCraftAlreadyOpen(filter) {
     if !AcWaitForInventory() {
         CraftLog("DoCraftAlreadyOpen: pixel not found — aborting")
         if (!acGridRunning)
-            ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
+            AioTip(" AutoCraft: waiting for inventory…", 0, 0)
         Sleep(500)
         return false
     }
@@ -17297,7 +17433,7 @@ AcDoCraft(filter) {
         CraftLog("DoCraft: pixel not found — aborting +" (A_TickCount - _acStart) "ms")
         PerfLogPush("craft", _acStart, "timeout")
         if (!acGridRunning)
-            ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
+            AioTip(" AutoCraft: waiting for inventory…", 0, 0)
         Sleep(500)
         return false
     }
@@ -17333,17 +17469,17 @@ AcStartSimple(*) {
     global acSimpleArmed, acTabActive, acSimpleFilterEdit
     AcBuildSimplePresets()
     if (acPresetNames.Length = 0) {
-        ToolTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
     global acSimpleArmed := !acSimpleArmed
     if (acSimpleArmed) {
         MainGui.Hide()
         global guiVisible := false
-        ToolTip(AcBuildCraftTooltip("Simple"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Simple"), 0, 0)
     } else {
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
     }
@@ -17375,7 +17511,7 @@ AcDoSimpleCraft() {
             global acCraftLoopRunning := false
             if (isMulti)
                 SafeDisableZ()
-            ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
+            AioTip(" AutoCraft: waiting for inventory…", 0, 0)
             Sleep(500)
             return
         }
@@ -17389,7 +17525,7 @@ AcDoSimpleCraft() {
         Click Round(1664*widthmultiplier) "," Round(379*heightmultiplier)
         Sleep(50)
         itemName := acPresetNames[acPresetIdx]
-        ToolTip(" AutoCraft Loop: " itemName "`n" stopKey " = Stop", 0, 0)
+        AioTip(" AutoCraft Loop: " itemName "`n" stopKey " = Stop", 0, 0)
         while (!acEarlyExit) {
             Loop (16 + acExtraClicks) {
                 if (acEarlyExit)
@@ -17408,7 +17544,7 @@ AcDoSimpleCraft() {
         global acEarlyExit := false
         global acCraftLoopRunning := false
         global acSimpleArmed := false
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
     } else {
@@ -17432,8 +17568,8 @@ AcStartTimed(*) {
 
     AcBuildTimedPresets()
     if (acPresetNames.Length = 0) {
-        ToolTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -17456,7 +17592,7 @@ AcStartTimed(*) {
         global acTimedArmed   := true
         MainGui.Hide()
         global guiVisible := false
-        ToolTip(AcBuildCraftTooltip("Timed"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Timed"), 0, 0)
     }
 }
 
@@ -17482,7 +17618,7 @@ AcTimedLoop() {
             global acCraftLoopRunning := false
             if (isMulti)
                 SafeDisableZ()
-            ToolTip(" AutoCraft: waiting for inventory…", 0, 0)
+            AioTip(" AutoCraft: waiting for inventory…", 0, 0)
             Sleep(500)
             return
         }
@@ -17495,7 +17631,7 @@ AcTimedLoop() {
         Sleep(150)
         Click Round(1664*widthmultiplier) "," Round(379*heightmultiplier)
         Sleep(50)
-        ToolTip(" AutoCraft Loop: " acActiveItemName "`n" stopKey " = Stop", 0, 0)
+        AioTip(" AutoCraft Loop: " acActiveItemName "`n" stopKey " = Stop", 0, 0)
         while (!acEarlyExit) {
             Loop (16 + acExtraClicks) {
                 if (acEarlyExit)
@@ -17513,7 +17649,7 @@ AcTimedLoop() {
         global acRunning := false
         global acEarlyExit := false
         global acCraftLoopRunning := false
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
         return
@@ -17536,9 +17672,9 @@ AcTimedLoop() {
             global acTimedRestart  := false
             global acTimedArmed    := true
             global acTimedFPressed := false
-            ToolTip(AcBuildCraftTooltip("Timed"), 0, 0)
+            AioTip(AcBuildCraftTooltip("Timed"), 0, 0)
         } else {
-            ToolTip()
+            AioTipOff()
             MainGui.Show()
             global guiVisible := true
         }
@@ -17565,7 +17701,7 @@ AcTimedLoop() {
             s := Mod(remaining, 60)
             status := m ":" (s < 10 ? "0" : "") s
         }
-        ToolTip("► " acActiveItemName "  " status "`nQ = Stop  |  " StrUpper(pcAccessKey) " = Craft  |  F1 = Stop", 0, 0)
+        AioTip("► " acActiveItemName "  " status "`nQ = Stop  |  " StrUpper(pcAccessKey) " = Craft  |  F1 = Stop", 0, 0)
         Sleep(250)
     }
 
@@ -17575,9 +17711,9 @@ AcTimedLoop() {
         global acTimedRestart  := false
         global acTimedArmed    := true
         global acTimedFPressed := false
-        ToolTip(AcBuildCraftTooltip("Timed"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Timed"), 0, 0)
     } else {
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
     }
@@ -17641,7 +17777,7 @@ AcTimedMultiLoop() {
             tt .= arrow " " name "  " status "`n"
         }
         tt .= "Q = Cycle  |  " StrUpper(pcAccessKey) " = Craft  |  F1 = Stop"
-        ToolTip(tt, 0, 0)
+        AioTip(tt, 0, 0)
 
         pollEnd := A_TickCount + 250
         while (A_TickCount < pollEnd && !acEarlyExit) {
@@ -17671,9 +17807,9 @@ AcTimedMultiCleanup() {
         global acTimedRestart  := false
         global acTimedArmed    := true
         global acTimedFPressed := false
-        ToolTip(AcBuildCraftTooltip("Timed"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Timed"), 0, 0)
     } else {
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
     }
@@ -17688,8 +17824,8 @@ AcStartGrid(*) {
 
     AcBuildGridPresets()
     if (acPresetNames.Length = 0) {
-        ToolTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
-        SetTimer(() => ToolTip(), -2000)
+        AioTip(" AutoCraft: choose a preset or enter a filter first", 0, 0)
+        SetTimer(() => AioTipOff(),-2000)
         return
     }
 
@@ -17709,7 +17845,7 @@ AcStartGrid(*) {
         global acFeedLastMs  := A_TickCount
         MainGui.Hide()
         global guiVisible := false
-        ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
     }
 }
 
@@ -17744,7 +17880,7 @@ AcGridLoop() {
                         AcDoCraft(filter)
                     }
                     stationIdx++
-                    ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+                    AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
                     AcFeedIfDue()
                     if (c > 0 && !acEarlyExit)
                         AcGridMove("{A down}", "{A up}", hWalk)
@@ -17757,7 +17893,7 @@ AcGridLoop() {
                     global acOcrCurrentStation := stationIdx
                     AcDoCraft(filter)
                     stationIdx++
-                    ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+                    AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
                     AcFeedIfDue()
                     if (c < cols - 1 && !acEarlyExit)
                         AcGridMove("{D down}", "{D up}", hWalk)
@@ -17787,10 +17923,10 @@ AcGridLoop() {
         global acGridArmed   := true
         global acFeedLastMs  := A_TickCount
         AcOcrResetTotal()
-        ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
     } else {
-        ToolTip()
-        ToolTip(,,,2)
+        AioTipOff()
+        AioTipOff(2)
         MainGui.Show()
         global guiVisible := true
     }
@@ -17819,7 +17955,7 @@ AcCountOnlyFPressed() {
     }
     Sleep(200)
     AcOcrReadStorageCountOnly()
-    ToolTip(" Count Only: " acOcrStations " stations  |  Total: " AcOcrFormatTotal(), 0, 0)
+    AioTip(" Count Only: " acOcrStations " stations  |  Total: " AcOcrFormatTotal(), 0, 0)
     CraftLog("CountOnly: " acOcrStations " stations, total=" acOcrTotal)
 }
 
@@ -17842,8 +17978,8 @@ AcOcrCopyTotal(*) {
     global acOcrTotal, acOcrStations
     formatted := AcOcrFormatTotal()
     A_Clipboard := formatted "  (" acOcrStations " stations)"
-    ToolTip(" Copied: " formatted, 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Copied: " formatted, 0, 0)
+    SetTimer(() => AioTipOff(),-1500)
 }
 
 ; ── Grid OCR — overlay ────────────────────────────────────────────────────────
@@ -17906,11 +18042,11 @@ AcTallyToggle(*) {
             global acEarlyExit := true
         }
         AcOcrResetTotal()
-        ToolTip(" Count: " StrUpper(pcAccessKey) " at each inventory  |  Count again to stop", 0, 0)
-        SetTimer(() => ToolTip(), -3000)
+        AioTip(" Count: " StrUpper(pcAccessKey) " at each inventory  |  Count again to stop", 0, 0)
+        SetTimer(() => AioTipOff(),-3000)
     } else {
         DarkBtnText(acTallyBtn, "Count")
-        ToolTip(,,,2)
+        AioTipOff(2)
     }
 }
 
@@ -17923,7 +18059,7 @@ AcOcrToggleResize(*) {
     }
     acOcrResizing := true
     DarkBtnText(acOcrResizeBtn, "Done")
-    ToolTip(" OCR Resize: WASD=move  Arrows=size  Enter=done", 0, 0)
+    AioTip(" OCR Resize: WASD=move  Arrows=size  Enter=done", 0, 0)
     AcOcrShowOverlay()
     try Hotkey("$Up",    AcOcrSizeUp,    "On")
     try Hotkey("$Down",  AcOcrSizeDown,  "On")
@@ -17952,7 +18088,7 @@ AcOcrExitResize() {
     AcOcrHideOverlay()
     AcOcrUpdateSizeTxt()
     AcOcrSaveConfig()
-    ToolTip()
+    AioTipOff()
 }
 
 AcOcrResizeDone(*) {
@@ -18133,7 +18269,7 @@ AcOcrReadSlots() {
 AcOcrUpdateCountTooltip() {
     global acOcrTotal, acOcrStations, acOcrEnabled
     if (!acOcrEnabled) {
-        ToolTip(,,,2)
+        AioTipOff(2)
         return
     }
     displayTotal := Floor(acOcrTotal)
@@ -18146,7 +18282,7 @@ AcOcrUpdateCountTooltip() {
         mVal := Round(displayTotal / 1000000, 1)
         formatted .= " (" mVal "m)"
     }
-    ToolTip(" Storage: " formatted "  (" acOcrStations " stations)", 0, 58, 2)
+    AioTip(" Storage: " formatted "  (" acOcrStations " stations)", 0, 58, 2)
 }
 
 AcOcrResetTotal() {
@@ -18219,8 +18355,8 @@ AcShowGridHelp(*) {
     ModeSelectTab.Value := newTab
     OnTabChange(ModeSelectTab)
     tabNames := ["JoinSim", "Magic F", "AutoLvL", "Popcorn", "Sheep", "Craft", "Macro", "Misc"]
-    ToolTip(" Tab: " tabNames[newTab], 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Tab: " tabNames[newTab])
+    SetTimer(() => AioTipOff(), -1500)
 }
 
 ^+Tab:: {
@@ -18234,8 +18370,8 @@ AcShowGridHelp(*) {
     ModeSelectTab.Value := newTab
     OnTabChange(ModeSelectTab)
     tabNames := ["JoinSim", "Magic F", "AutoLvL", "Popcorn", "Sheep", "Craft", "Macro", "Misc"]
-    ToolTip(" Tab: " tabNames[newTab], 0, 0)
-    SetTimer(() => ToolTip(), -1500)
+    AioTip(" Tab: " tabNames[newTab])
+    SetTimer(() => AioTipOff(), -1500)
 }
 
 $[:: {
@@ -18265,7 +18401,7 @@ $F4:: {
         SetTimer(AutoclickLoop, 0)
         try Hotkey("$[", "Off")
         try Hotkey("$]", "Off")
-        ToolTip()
+        AioTipOff()
     }
     TrayTip(" AIO stopped running"," AIO++")
     HideTrayTipTimer(2000)
@@ -18293,7 +18429,7 @@ $F3:: {
         MacroRegisterHotkeys(false)
         MainGui.Show("x177 y330")
         global guiVisible := true
-        ToolTip()
+        AioTipOff()
         return
     }
     global lastDebugContext := "feed"
@@ -18375,7 +18511,7 @@ $F1:: {
         global acTimedMultiActive    := false
         if (acOcrResizing)
             AcOcrExitResize()
-        ToolTip(,,,2)
+        AioTipOff(2)
         if (acRunning) {
             global acEarlyExit := true
             global acRunning   := false
@@ -18421,9 +18557,9 @@ $F1:: {
         try ModeSelectTab.Focus()
         Sleep(100)
         MouseMove(177 + 225, 330 + 204, 0)
-        ToolTip()
-        ToolTip(,,,1)
-        ToolTip(,,,2)
+        AioTipOff()
+        AioTipOff(1)
+        AioTipOff(2)
         global guiVisible := true
     } else {
         if (obUploadMode = 3 && obUploadArmed) {
@@ -18445,7 +18581,7 @@ $F1:: {
                     break
                 }
             }
-            ToolTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
+            AioTip(" Upload Char armed → " nextLabel note "`n ↑↓ cycle servers  |  " StrUpper(pcAccessKey) " at transmitter  |  F6 = cycle/off", 0, 0)
             OBCharRegisterSvrKeys()
             return
         }
@@ -18454,7 +18590,7 @@ $F1:: {
         global guiVisible := false
         MainGui.Hide
         if (gmkMode != "off")
-            ToolTip(GmkBuildTooltip(), 0, 0)
+            AioTip(GmkBuildTooltip())
     }
 }
 
@@ -18517,7 +18653,7 @@ _PcInvHotkeyHandler(thisHotkey) {
         global acGridRunning := true
         global acRunning   := true
         CraftLog("F pressed — Grid Walk armed, launching loop")
-        ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+        AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
         SetTimer(AcGridLoop, -1)
         return
     }
@@ -18614,8 +18750,8 @@ $F9:: {
         SetTimer(AutoclickLoop, 0)
         try Hotkey("$[", "Off")
         try Hotkey("$]", "Off")
-        ToolTip(" AUTOCLICK Off", 0, 0)
-        SetTimer(() => (ToolTip(), OBCharRestoreTooltip()), -1500)
+        AioTip(" AUTOCLICK Off")
+        SetTimer(() => (AioTipOff(), OBCharRestoreTooltip()), -1500)
         if (!guiVisible) {
             MainGui.Show("NoActivate")
             global guiVisible := true
@@ -18641,7 +18777,7 @@ AutoclickLoop() {
 
 AutoclickUpdateTooltip() {
     global autoclickInterval
-    ToolTip(" AUTOCLICK ON  (Interval: " autoclickInterval "ms)`n[ = Slower   ] = Faster`nF9 = Stop", 0, 0)
+    AioTip(" AUTOCLICK ON  (Interval: " autoclickInterval "ms)`n[ = Slower   ] = Faster`nF9 = Stop")
 }
 
 AutoclickSlower(thisHotkey) {
@@ -18666,11 +18802,11 @@ AutoclickFaster(thisHotkey) {
 PcShowArmedTooltip() {
     global pcF10Step, pcMode
     if (pcF10Step > 0)
-        ToolTip(PcBuildF10Tooltip(), 0, 0)
+        AioTip(PcBuildF10Tooltip())
     else if (pcMode > 0)
-        ToolTip(PcBuildTooltip(), 0, 0)
+        AioTip(PcBuildTooltip())
     else
-        ToolTip()
+        AioTipOff()
 }
 
 PcBuildF10Tooltip() {
@@ -18721,8 +18857,8 @@ PcF10Cycle() {
             global pcMode := 0, pcCustomFilter := ""
             try pcF10StatusTxt.Text := ""
             try pcF10SpeedTxt.Text  := ""
-            ToolTip(" Popcorning Off", 0, 0)
-            SetTimer(() => ToolTip(), -1500)
+            AioTip(" Popcorning Off")
+            SetTimer(() => AioTipOff(), -1500)
         case 1:
             global pcMode := 3, pcCustomFilter := ""
             global pcForgeTransferAll := false
@@ -18826,8 +18962,8 @@ PcHotkeyBracketRight(thisHotkey) {
                 MacroRegisterHotkeys(true)
                 if WinExist(arkwindow)
                     WinActivate(arkwindow)
-                ToolTip(" ► " selMacro.name " armed [Q]`n" MacroSpeedHint(selMacro) "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm", 0, 0)
-                SetTimer(() => ToolTip(), -3000)
+                AioTip(" ► " selMacro.name " armed [Q]`n" MacroSpeedHint(selMacro) "`n Tap to run  |  Hold for game  |  Z = next  |  F1 = disarm")
+                SetTimer(() => AioTipOff(), -3000)
             } else if (macroArmed) {
                 global macroArmed := false
                 MacroRegisterHotkeys(true)
@@ -18840,7 +18976,7 @@ PcHotkeyBracketRight(thisHotkey) {
     if (runMagicFScript) {
         if (WinActive(arkwindow) && !magicFRefillMode && magicFPresetNames.Length > 1) {
             global magicFPresetIdx := Mod(magicFPresetIdx, magicFPresetNames.Length) + 1
-            ToolTip(MagicFBuildTooltip(), 0, 0)
+            AioTip(MagicFBuildTooltip())
         }
         return
     }
@@ -18856,7 +18992,7 @@ PcHotkeyBracketRight(thisHotkey) {
     if (depoEggsActive) {
         if (depoCycle.Length > 1) {
             global depoCycleIdx := Mod(depoCycleIdx, depoCycle.Length) + 1
-            ToolTip(DepoBuildTooltip(), 0, 0, 1)
+            AioTip(DepoBuildTooltip(), 0, 0, 1)
         }
         return
     }
@@ -18865,7 +19001,7 @@ PcHotkeyBracketRight(thisHotkey) {
         global qhArmed   := false
         global qhRunning := false
         global qhMode    := 0
-        ToolTip(,,,1)
+        AioTipOff(1)
         qhAllBtn.Value    := 0
         qhSingleBtn.Value := 0
         qhStatusTxt.Text := "Select a mode then press START"
@@ -18873,14 +19009,14 @@ PcHotkeyBracketRight(thisHotkey) {
     }
     if (runClaimAndNameScript) {
         global runClaimAndNameScript := false
-        ToolTip(,,,2)
+        AioTipOff(2)
         stoppedAny := true
     }
     if (runNameAndSpayScript) {
         global runNameAndSpayScript := false
         Send("{e up}")
         Click("Up")
-        ToolTip(,,,2)
+        AioTipOff(2)
         stoppedAny := true
     }
     if (stoppedAny) {
@@ -18893,7 +19029,7 @@ PcHotkeyBracketRight(thisHotkey) {
         if (acPresetNames.Length > 1) {
             acPresetIdx := Mod(acPresetIdx, acPresetNames.Length) + 1
             mode := acSimpleArmed ? "Simple" : acTimedArmed ? "Timed" : "Grid"
-            ToolTip(AcBuildCraftTooltip(mode), 0, 0)
+            AioTip(AcBuildCraftTooltip(mode), 0, 0)
         }
         return
     }
@@ -18908,7 +19044,7 @@ PcHotkeyBracketRight(thisHotkey) {
             if (acPresetNames.Length > 1) {
                 global acPresetIdx := Mod(acPresetIdx, acPresetNames.Length) + 1
                 CraftLog("Q-cycle → preset #" acPresetIdx " [" acPresetNames[acPresetIdx] "]")
-                ToolTip(AcBuildCraftTooltip("Grid"), 0, 0)
+                AioTip(AcBuildCraftTooltip("Grid"), 0, 0)
             }
             return
         }
@@ -18916,7 +19052,7 @@ PcHotkeyBracketRight(thisHotkey) {
         global acTimedFPressed := false
         global acTimedRestart  := false
         global acGridRestart   := false
-        ToolTip(" AutoCraft: stopping…", 0, 0)
+        AioTip(" AutoCraft: stopping…", 0, 0)
         return
     }
     if (obUploadRunning) {
@@ -18928,7 +19064,7 @@ PcHotkeyBracketRight(thisHotkey) {
     if (obDownloadRunning || obDownloadArmed) {
         global obDownloadRunning := false
         global obDownloadArmed  := false
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
         return
@@ -18946,7 +19082,7 @@ PcHotkeyBracketRight(thisHotkey) {
         SetTimer(AutoclickLoop, 0)
         try Hotkey("$[", "Off")
         try Hotkey("$]", "Off")
-        ToolTip()
+        AioTipOff()
         MainGui.Show()
         global guiVisible := true
         return
@@ -19419,8 +19555,8 @@ F11:: {
     }
 
     A_Clipboard := out
-    ToolTip("Debug copied  [" ctx "]", 0, 0)
-    SetTimer(() => (ToolTip(), OBCharRestoreTooltip()), -2000)
+    AioTip("Debug copied  [" ctx "]", 0, 0)
+    SetTimer(() => (AioTipOff(),OBCharRestoreTooltip()), -2000)
 }
 
 ;-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -19497,7 +19633,7 @@ ImprintToggleArmed(*) {
     imprintStatusTxt.Text := "ARMED — R=read  Q=auto"
     MainGui.Hide()
     global guiVisible := false
-    ToolTip("IMPRINT ARMED — R read | Q auto-scan`nF1 = stop", 10, 10)
+    AioTip("IMPRINT ARMED — R read | Q auto-scan`nF1 = stop", 10, 10)
 }
 
 ImprintStopAll() {
@@ -19508,7 +19644,7 @@ ImprintStopAll() {
     if (imprintResizing)
         ImprintExitResize()
     ImprintHideScanOverlay()
-    ToolTip()
+    AioTipOff()
 }
 
 ImprintRHotkey(*) {
@@ -19523,11 +19659,11 @@ ImprintToggleAutoMode() {
         return
     if (imprintAutoMode) {
         imprintAutoMode := false
-        ToolTip("Auto-scan OFF`nARMED — R read | Q auto-scan", 10, 10)
+        AioTip("Auto-scan OFF`nARMED — R read | Q auto-scan", 10, 10)
         return
     }
     imprintAutoMode := true
-    ToolTip("Auto-scan ON — scanning...", 10, 10)
+    AioTip("Auto-scan ON — scanning...", 10, 10)
     ImprintAutoScanLoop()
 }
 
@@ -19553,19 +19689,19 @@ ImprintAutoScanLoop() {
 
         if (matched != "") {
             ImLog("Auto-scan OCR: [" ocrText "] → matched [" matched "]")
-            ToolTip("Detected: " matched, 10, 10)
+            AioTip("Detected: " matched, 10, 10)
             ImprintProcessFood(matched, ocrText)
             if (imprintScanning && imprintAutoMode) {
                 ImprintShowScanOverlay()
                 Loop 2 {
                     remaining := Format("{:.1f}", (3 - A_Index) * 0.5)
-                    ToolTip(matched " -> Hotbar 0 — Feed now!`nResuming in " remaining "s...", 10, 10)
+                    AioTip(matched " -> Hotbar 0 — Feed now!`nResuming in " remaining "s...", 10, 10)
                     Sleep(500)
                     if (!imprintScanning || !imprintAutoMode)
                         break
                 }
                 if (imprintScanning && imprintAutoMode)
-                    ToolTip("Auto-scan ON — scanning...", 10, 10)
+                    AioTip("Auto-scan ON — scanning...", 10, 10)
             }
         }
 
@@ -19573,7 +19709,7 @@ ImprintAutoScanLoop() {
     }
 
     if (imprintScanning && !imprintAutoMode)
-        ToolTip("Auto-scan OFF`nARMED — R read | Q auto-scan", 10, 10)
+        AioTip("Auto-scan OFF`nARMED — R read | Q auto-scan", 10, 10)
 }
 
 ImprintOnReadAndProcess() {
@@ -19583,13 +19719,13 @@ ImprintOnReadAndProcess() {
     if (!imprintScanning)
         return
 
-    ToolTip("Reading...", 10, 10)
+    AioTip("Reading...", 10, 10)
     ImLog("Manual read triggered")
     try {
         ocrText := OCR.FromRect(imprintSnapX, imprintSnapY, imprintSnapW, imprintSnapH, {scale: 3}).Text
     } catch as ocrErr {
         ImLog("OCR FAILED: " ocrErr.Message)
-        ToolTip("OCR failed — try again`nARMED — R read | Q auto-scan", 10, 10)
+        AioTip("OCR failed — try again`nARMED — R read | Q auto-scan", 10, 10)
         return
     }
 
@@ -19604,17 +19740,17 @@ ImprintOnReadAndProcess() {
 
     if (matched = "") {
         ImLog("No match in: [" ocrText "]")
-        ToolTip("No food found: [" ocrText "]`nARMED — R read | Q auto-scan", 10, 10)
+        AioTip("No food found: [" ocrText "]`nARMED — R read | Q auto-scan", 10, 10)
         return
     }
 
-    ToolTip("Detected: " matched, 10, 10)
+    AioTip("Detected: " matched, 10, 10)
     ImLog("Manual OCR: [" ocrText "] → matched [" matched "]")
     ImprintProcessFood(matched, ocrText)
 
     if (imprintScanning) {
         ImprintShowScanOverlay()
-        ToolTip("Done: " matched "`nARMED — R read | Q auto-scan", 10, 10)
+        AioTip("Done: " matched "`nARMED — R read | Q auto-scan", 10, 10)
     }
 }
 
@@ -19670,8 +19806,8 @@ ImprintProcessFood(foodName, ocrText := "") {
 
     if (!inventoryOpen) {
         ImLog("FAIL: inventory timeout")
-        ToolTip("[FAIL] Inventory timeout", 10, 10)
-        SetTimer(() => ToolTip(), -4000)
+        AioTip("[FAIL] Inventory timeout", 10, 10)
+        SetTimer(() => AioTipOff(),-4000)
         return
     }
 
@@ -19681,8 +19817,8 @@ ImprintProcessFood(foodName, ocrText := "") {
     ImLog("Pre-click verify: inv still open=" invStillOpen)
     if (!invStillOpen) {
         ImLog("FAIL: inventory closed during settle")
-        ToolTip("[FAIL] Inventory closed", 10, 10)
-        SetTimer(() => ToolTip(), -4000)
+        AioTip("[FAIL] Inventory closed", 10, 10)
+        SetTimer(() => AioTipOff(),-4000)
         return
     }
 

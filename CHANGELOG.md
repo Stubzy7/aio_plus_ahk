@@ -2,6 +2,14 @@
 
 ---
 
+All tooltips now use the themed dark style
+Tooltips auto-size to text, no more oversized boxes or clipped wrapped lines
+Popcorn storage count now reads cleanly up to 9999 stacks
+Popcorn OCR retries on a transient 0 and no longer strips valid counts as weight decimals
+Popcorn skips a drop pass when storage is confirmed empty instead of running a no-op
+
+---
+
 Added 7 color themes
 Log bot sims back to the last joined server on disconnect, opens the tribe log, and highlights online players
 Added option to send a tribe log screenshot to Discord on ping
