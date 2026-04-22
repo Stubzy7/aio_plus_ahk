@@ -761,28 +761,34 @@ AioTip(text, x := 0, y := 0, slot := 1) {
     w := m.w + 2
     h := m.h + 2
     if (_aioTipGuis.Has(slot)) {
-        try _aioTipGuis[slot].Destroy()
-        _aioTipGuis.Delete(slot)
+        entry := _aioTipGuis[slot]
+        try {
+            entry.txt.Text := text
+            entry.txt.Move(,, w, h)
+            entry.g.Move(x, y, w + 16, h + 12)
+            entry.g.Show("NoActivate")
+            return
+        }
     }
     g := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x08000080")
     g.BackColor := _tipBgHex
     g.MarginX := 8, g.MarginY := 6
     g.SetFont("s9", "Segoe UI")
-    g.Add("Text", "w" w " h" h " c" _tipFgHex, text)
+    txt := g.Add("Text", "w" w " h" h " c" _tipFgHex, text)
     g.Show("x" x " y" y " NoActivate")
-    _aioTipGuis[slot] := g
+    _aioTipGuis[slot] := { g: g, txt: txt }
 }
 
 AioTipOff(slot := 0) {
     global _aioTipGuis
     if (slot = 0) {
-        for k, g in _aioTipGuis
-            try g.Destroy()
+        for k, entry in _aioTipGuis
+            try entry.g.Destroy()
         _aioTipGuis.Clear()
         return
     }
     if (_aioTipGuis.Has(slot)) {
-        try _aioTipGuis[slot].Destroy()
+        try _aioTipGuis[slot].g.Destroy()
         _aioTipGuis.Delete(slot)
     }
 }

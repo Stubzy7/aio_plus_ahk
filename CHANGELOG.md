@@ -2,6 +2,10 @@
 
 ---
 
+Fixed sim tooltip leaving stuck duplicates on state changes and after joining server
+
+---
+
 All tooltips now use the themed dark style
 Tooltips auto-size to text, no more oversized boxes or clipped wrapped lines
 Popcorn storage count now reads cleanly up to 9999 stacks
